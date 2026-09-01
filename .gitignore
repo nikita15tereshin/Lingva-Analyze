@@ -1,0 +1,24 @@
+# Виртуальное окружение
+venv/
+.env
+.env.local
+
+# Кэш Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Логи и базы данных
+*.log
+*.sqlite3
+*.db
+
+# Данные (PDF и прочее)
+data/
+!data/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+*.swp
