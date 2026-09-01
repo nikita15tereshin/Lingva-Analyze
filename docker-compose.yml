@@ -6,7 +6,7 @@ services:
     container_name: lingva_postgres
     environment:
       POSTGRES_USER: lingva_user
-      POSTGRES_PASSWORD: lingva_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: lingva_db
     ports:
       - "5432:5432"
