@@ -5,13 +5,21 @@ API_KEY = os.getenv("LLM_API_KEY")
 
 client = OpenAI(
     base_url='https://api.tokenrouter.com/v1',
-    api_key=API_KEY if API_KEY else "sk-yqac6Kh00DXYuuM2yCg5CxvbJyU3lFW277WQfmnA2jFO8rV3",
+    api_key=API_KEY if API_KEY else "missing-key",
 )
 
 def analyze_semantic_context_stream(word: str, sentence: str, expected_region: str):
     """
     Генератор, который отправляет запрос в LLM и возвращает ответ чанками (потоком).
+    Ключ берется только из переменной окружения LLM_API_KEY.
     """
+    if not API_KEY:
+        yield (
+            "Ключ LLM не задан. Установите переменную окружения LLM_API_KEY "
+            "(в файле .env или через export)."
+        )
+        return
+
     prompt = f"""
     Ты эксперт по региональным вариантам немецкого языка (Германия, Австрия, Швейцария).
     
@@ -31,7 +39,7 @@ def analyze_semantic_context_stream(word: str, sentence: str, expected_region: s
         {"role": "user", "content": prompt}
     ]
     
-    print(f"🚀 [LLM Stream] Запрос для слова: '{word}' отправлен...")
+    print(f"[LLM Stream] Запрос для слова: '{word}' отправлен...")
     
     try:
         # Включаем stream=True и убираем таймаут, чтобы ждать столько, сколько нужно
@@ -47,5 +55,5 @@ def analyze_semantic_context_stream(word: str, sentence: str, expected_region: s
                 yield chunk.choices[0].delta.content
                 
     except Exception as e:
-        print(f"❌ [LLM Stream] Ошибка: {str(e)}")
-        yield f"\n\n⚠️ Ошибка при обращении к нейросети: {str(e)}"
+        print(f"[LLM Stream] Ошибка: {str(e)}")
+        yield f"\n\nОшибка при обращении к нейросети: {str(e)}"

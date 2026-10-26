@@ -9,44 +9,44 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 from src.parser.reader import extract_and_normalize
 from src.nlp.processor import process_text
-from src.index.indexer import build_index
 from src.db.session import SessionLocal
-from src.db.crud import create_document, save_nlp_data_to_db, get_index_from_db
+from src.db.crud import (
+    create_document,
+    save_nlp_data_to_db,
+    get_document_index_from_db,
+)
 
 app = FastAPI(title="Lingva-Analyze API")
 
 tasks_db = {}
 os.makedirs("data/raw", exist_ok=True)
 
+def set_task_status(task_id: str, status: str):
+    tasks_db[task_id] = status
+    print(f"[task {task_id}] {status}")
+
+
 def process_document_background(task_id: str, file_path: str, filename: str):
-    """Фоновая задача, которая теперь сохраняет всё в базу данных."""
-    # Открываем сессию подключения к PostgreSQL
+    """Фоновая обработка: извлечение текста, NLP, сохранение в БД."""
     db = SessionLocal()
     try:
-        tasks_db[task_id] = "извлечение текста..."
-        text = extract_and_normalize(file_path)
-        
-        tasks_db[task_id] = "создание записи в БД..."
+        set_task_status(task_id, "извлечение текста...")
+        text = extract_and_normalize(file_path, filename)
+
+        set_task_status(task_id, "создание записи в БД...")
         doc = create_document(db, filename=filename)
-        
-        tasks_db[task_id] = "nlp анализ (это может занять время)..."
+
+        set_task_status(task_id, "NLP-анализ...")
         nlp_data = process_text(text)
-        
-        tasks_db[task_id] = "построение индекса..."
-        index_data = build_index(doc.id, nlp_data["sentences"])
-        
-        tasks_db[task_id] = "сохранение в БД (предложения, токены, индекс)..."
-        save_nlp_data_to_db(db, doc.id, nlp_data, index_data)
-        
-        tasks_db[task_id] = "готово"
-        print(f"✅ Задача {task_id} завершена! Документ сохранен в БД под ID: {doc.id}")
-        
+
+        set_task_status(task_id, "сохранение в БД (предложения, токены, индекс)...")
+        save_nlp_data_to_db(db, doc.id, nlp_data)
+
+        set_task_status(task_id, "готово")
     except Exception as e:
         db.rollback()
-        tasks_db[task_id] = f"ошибка: {str(e)}"
-        print(f"❌ Ошибка в задаче {task_id}: {e}")
+        set_task_status(task_id, f"ошибка: {e}")
     finally:
-        # Обязательно закрываем соединение, чтобы не «повесить» базу
         db.close()
 
 @app.post("/upload")
@@ -78,16 +78,16 @@ async def get_status(task_id: str):
 
 @app.get("/index/{doc_id}")
 async def get_index(doc_id: int):
-    """Эндпоинт для проверки того, что индекс реально летит в БД."""
+    """Восстановленный из БД лексический индекс документа."""
     db = SessionLocal()
     try:
-        index_data = get_index_from_db(db, doc_id)
+        index_data = get_document_index_from_db(db, doc_id)
         if not index_data:
             return {"error": f"Индекс для документа с ID {doc_id} не найден."}
         return {
-            "doc_id": doc_id, 
-            "unique_words_count": len(index_data), 
-            "index_data": index_data
+            "doc_id": doc_id,
+            "unique_words_count": len(index_data),
+            "index_data": index_data,
         }
     finally:
         db.close()
