@@ -24,7 +24,8 @@ from src.db.models import (
     LexicalIndex,
 )
 
-QUERY_TYPES = ("LEMMA_SET", "LEMMA_AND", "WORD_REGEX", "TEXT_REGEX", "LEXICAL_PAIR", "DICTIONARY")
+QUERY_TYPES = ("LEMMA_SET", "LEMMA_AND", "WORD_REGEX", "TEXT_REGEX",
+               "LEXICAL_PAIR", "DICTIONARY", "FREQUENCY_RANGE")
 
 
 def parse_markers(param: QueryParameter) -> list[dict]:
@@ -111,6 +112,14 @@ def run_lemma_and(db: Session, param: QueryParameter, doc_ids: list[int]) -> int
 
     created = 0
     marker_text = ", ".join(m["lemma"] for m in markers)
+    # словоформы маркеров для подсветки в контексте (берем первую совпавшую форму)
+    forms_by_sentence: dict[int, str | None] = {}
+    if common:
+        lemmas = [m["lemma"] for m in markers]
+        rows = _occurrence_rows(db, lemmas, None, doc_ids)
+        for sentence_id, _document_id, lemma, word_form in rows:
+            if sentence_id in common and forms_by_sentence.get(sentence_id) is None:
+                forms_by_sentence[sentence_id] = word_form
     for sentence_id in sorted(common or ()):
         sentence = db.get(Sentence, sentence_id)
         db.add(Hit(
@@ -118,7 +127,7 @@ def run_lemma_and(db: Session, param: QueryParameter, doc_ids: list[int]) -> int
             document_id=sentence.document_id,
             sentence_id=sentence_id,
             matched_marker=marker_text,
-            word_form=None,
+            word_form=forms_by_sentence.get(sentence_id),
         ))
         created += 1
     return created
@@ -222,6 +231,43 @@ def run_dictionary(db: Session, param: QueryParameter, doc_ids: list[int]) -> in
     return created
 
 
+def run_frequency_range(db: Session, param: QueryParameter, doc_ids: list[int]) -> int:
+    """Отдельный прогон (прикол А): леммы с частотой в документе от min до max.
+
+    Маркеры задаются параметрами, не словами: {"min": 1, "max": 5}.
+    Каждое такое слово фиксируется одним hit'ом на документ; word_form —
+    любая встретившаяся форма, matched_marker — 'лемма x N'.
+    """
+    cfg = json.loads(param.markers) if param.markers else {}
+    lo = int(cfg.get("min", 1))
+    hi = int(cfg.get("max", 5))
+
+    # LexicalIndex.document_id — виртуальное поле, в БД документ зашит в sentences
+    doc_id_col = Sentence.document_id
+    rows = (
+        db.query(doc_id_col, Token.lemma, func.count(LexicalIndex.id),
+                 func.min(LexicalIndex.word_form))
+        .join(Token, LexicalIndex.token_id == Token.id)
+        .join(Sentence, LexicalIndex.sentence_id == Sentence.id)
+        .filter(doc_id_col.in_(doc_ids))
+        .group_by(doc_id_col, Token.lemma)
+        .having(func.count(LexicalIndex.id).between(lo, hi))
+        .all()
+    )
+
+    created = 0
+    for document_id, lemma, count, form in rows:
+        db.add(Hit(
+            parameter_id=param.id,
+            document_id=document_id,
+            sentence_id=None,
+            matched_marker=f"{lemma} x {count}",
+            word_form=form or lemma,
+        ))
+        created += 1
+    return created
+
+
 RUNNERS = {
     "LEMMA_SET": run_lemma_set,
     "LEMMA_AND": run_lemma_and,
@@ -229,6 +275,7 @@ RUNNERS = {
     "TEXT_REGEX": run_text_regex,
     "LEXICAL_PAIR": run_lexical_pair,
     "DICTIONARY": run_dictionary,
+    "FREQUENCY_RANGE": run_frequency_range,
 }
 
 

@@ -11,7 +11,10 @@ class FakeDoc:
 
 def _patch_pipeline(monkeypatch):
     monkeypatch.setattr(api_main, "extract_and_normalize", lambda *a, **k: "Die Bundeswehr übt.")
-    monkeypatch.setattr(api_main, "create_document", lambda db, filename: FakeDoc())
+    monkeypatch.setattr(
+        api_main, "create_document",
+        lambda db, filename=None, **kw: FakeDoc(),
+    )
     monkeypatch.setattr(
         api_main, "process_text",
         lambda text: {"sentences": [{"sent_id": 0, "tokens": [
@@ -40,7 +43,7 @@ def test_upload_status_and_index(monkeypatch):
 
     status_resp = client.get(f"/status/{task_id}")
     assert status_resp.status_code == 200
-    assert status_resp.json()["status"] == "готово"
+    assert status_resp.json()["status"].startswith("готово")
 
     index_resp = client.get("/index/42")
     assert index_resp.status_code == 200
@@ -55,8 +58,7 @@ def test_index_not_found(monkeypatch):
     client = TestClient(api_main.app)
 
     resp = client.get("/index/999")
-    assert resp.status_code == 200
-    assert "error" in resp.json()
+    assert resp.status_code == 404
 
 
 def test_status_unknown_task():

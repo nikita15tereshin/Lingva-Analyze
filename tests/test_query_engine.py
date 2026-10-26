@@ -1,5 +1,7 @@
 """Сквозная проверка движка матрицы: индексация -> прогон параметров -> статистика."""
 
+import json
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -111,12 +113,12 @@ def test_word_regex_gender(db, indexed_corpus):
 def test_text_regex_paragraph_and_year(db, indexed_corpus):
     from src.db.models import QueryParameter
     p = QueryParameter(code="TEST-P4", name="параграфы", query_type="TEXT_REGEX",
-                       markers='["§\\s*\\d+"]')
+                       markers=json.dumps([r"§\s*\d+"]))
     db.add(p); db.commit()
     assert qe.run_parameter(db, p)["hits"] == 1
 
     y = QueryParameter(code="TEST-YR", name="годы", query_type="TEXT_REGEX",
-                       markers='["\\b(1[89]\\d{2}|20\\d{2})\\b"]')
+                       markers=json.dumps([r"\b(1[89]\d{2}|20\d{2})\b"]))
     db.add(y); db.commit()
     assert qe.run_parameter(db, y)["hits"] == 1
 

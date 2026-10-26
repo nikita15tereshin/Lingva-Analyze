@@ -161,7 +161,7 @@ class Hit(Base):
     id = Column(Integer, primary_key=True, index=True)
     parameter_id = Column(Integer, ForeignKey('query_parameters.id', ondelete="CASCADE"))
     document_id = Column(Integer, ForeignKey('documents.id', ondelete="CASCADE"))
-    sentence_id = Column(Integer, ForeignKey('sentences.id', ondelete="CASCADE"))
+    sentence_id = Column(Integer, ForeignKey('sentences.id', ondelete="SET NULL"), nullable=True)
     matched_marker = Column(String, nullable=True)  # какая именно лемма/подстрока сработала
     word_form = Column(String, nullable=True)
     run_ts = Column(DateTime, default=datetime.utcnow)

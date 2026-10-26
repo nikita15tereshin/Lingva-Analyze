@@ -29,7 +29,13 @@ VALID_COUNTRIES = {"DE", "AT", "CH"}
 os.makedirs("data/raw", exist_ok=True)
 
 
+# Статусы фоновых задач держим в памяти процесса (см. рекомендацию в AUDIT.md
+# о переносе в таблицу БД/очередь при переходе на несколько воркеров).
+TASK_STATUSES: dict[str, str] = {}
+
+
 def set_task_status(task_id: str, status: str):
+    TASK_STATUSES[task_id] = status
     print(f"[task {task_id}] {status}")
 
 
@@ -97,9 +103,9 @@ async def upload_document(
 
 @app.get("/status/{task_id}")
 async def get_status(task_id: str):
-    # Статусы фоновых задач живут только в памяти процесса — при рестарте
-    # или нескольких воркерах они теряются; см. рекомендацию в AUDIT.md.
-    return {"task_id": task_id, "status": "неизвестен (статусы не персистентны)"}
+    if task_id not in TASK_STATUSES:
+        return {"task_id": task_id, "status": "Задача не найдена"}
+    return {"task_id": task_id, "status": TASK_STATUSES[task_id]}
 
 
 @app.get("/index/{doc_id}")
