@@ -13,7 +13,7 @@ Base.metadata.create_all(bind=engine)
 
 def load_csv_to_db(db, filepath):
     if not os.path.exists(filepath):
-        print(f"⚠️ Файл не найден: {filepath}")
+        print(f"Файл не найден: {filepath}")
         return 0
     
     count = 0
@@ -49,7 +49,7 @@ def seed_data():
     austria_path = os.path.join(base_dir, 'data', 'dictionaries', 'austriacisms.csv')
     swiss_path = os.path.join(base_dir, 'data', 'dictionaries', 'helvetisms.csv')
     
-    print("📥 Загрузка словарей из CSV...")
+    print("Загрузка словарей из CSV...")
     
     added_at = load_csv_to_db(db, austria_path)
     added_ch = load_csv_to_db(db, swiss_path)
@@ -57,7 +57,7 @@ def seed_data():
     # Если добавились новые слова, сохраняем изменения
     if added_at > 0 or added_ch > 0:
         db.commit()
-        print(f"✅ Успешно добавлено новых слов: {added_at} (AT), {added_ch} (CH)!")
+        print(f"Добавлено новых слов: {added_at} (AT), {added_ch} (CH)!")
     else:
         print("ℹ️ База актуальна. Новых слов в CSV не найдено.")
         

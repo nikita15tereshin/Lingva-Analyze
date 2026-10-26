@@ -81,4 +81,4 @@ if __name__ == "__main__":
     loaded_index = load_index_from_json(test_file)
     print(loaded_index)
     
-    print("\n✅ Блок 4 успешно завершен!")
+    print("Блок 4 завершен!")
