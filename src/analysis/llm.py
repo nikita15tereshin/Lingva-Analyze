@@ -71,6 +71,29 @@ def analyze_semantic_context_stream(word: str, sentence: str, expected_region: s
         yield f"\n\nОшибка при обращении к нейросети: {str(e)}"
 
 
+def complete_once(prompt: str) -> str:
+    """Одиночный (не потоковый) запрос к настроенному провайдеру.
+
+    Используется гибридным классификатором P7: спорные случаи уходят в LLM
+    одним пакетом, ответ нужен целиком для разбора построчных вердиктов.
+    """
+    settings = load_raw()
+    if not settings["api_key"]:
+        raise RuntimeError(_not_configured_message())
+    client, model = _client_and_model()
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system",
+             "content": "You are an intelligent linguistic assistant. "
+                        "Follow the required output format exactly."},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.1,
+    )
+    return response.choices[0].message.content or ""
+
+
 def analyze_matrix_parameter_stream(parameter_code: str, max_examples: int = 40):
     """Пункт 4.3 ТЗ: сравнительный анализ по результатам прогона параметра.
 

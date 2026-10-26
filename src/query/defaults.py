@@ -61,6 +61,15 @@ DEFAULT_PARAMETERS = [
         "comment": "Регулярка по словоформе; при индекции сохраняется фактическая форма (Polizistin).",
     },
     {
+        "code": "P7",
+        "name": "Семантические сдвиги (гибрид: правила + LLM)",
+        "query_type": "SEMANTIC_SHIFT",
+        "markers": [],
+        "comment": ("Омонимы из справочника semantic_shifts. Уверенные случаи "
+                    "разметляет код по колокациям, спорные помечаются llm_pending "
+                    "и добираются LLM одним пакетом."),
+    },
+    {
         "code": "STAT-YEARS",
         "name": "Цифры и годы в тексте",
         "query_type": "TEXT_REGEX",
@@ -85,9 +94,45 @@ DEFAULT_LEXICAL_PAIRS = [
     ("Пиво низовой бродящий", "Pils", "Bier", "Bier"),
 ]
 
+# Стартовый набор омонимов для P7 (пункт 3.2 ТЗ).
+# word, country, meaning, collocations, examples (эталонные предложения для
+# векторной линии; без них слово разбирается только правилами и LLM)
+DEFAULT_SEMANTIC_SHIFTS = [
+    ("Gymnasium", "DE", "тип средней школы с углубленной программой",
+     ["schule", "abitur", "klassen", "lehrer", "maturanten", "unterricht"],
+     ["Das Gymnasium ist eine Schule mit gymnasialer Bildung und Abitur.",
+      "Die Lehrerin unterrichtet am Gymnasium drei Klassen."]),
+    ("Gymnasium", "AT", "спортивный зал",
+     ["sport", "geräte", "fitness", "turnsaal", "training"],
+     ["Im Gymnasium der Universität stehen neue Geräte für das Training.",
+      "Das Gymnasium ist mit Fitnessgeräten und Matten ausgestattet."]),
+    ("Gymnasium", "CH", "тип средней школы (гимназия)",
+     ["schule", "matura", "klassen", "lehrer", "unterricht"],
+     ["Er besucht das Gymnasium und macht die Matura.",
+      "Am Gymnasium unterrichten Lehrer verschiedene Schulfächer."]),
+    ("Parlament", "DE", "бундестаг как институт; здание",
+     ["bundestag", "abgeordnete", "gesetzgebung"],
+     ["Das Parlament beschloss das Gesetz mit den Stimmen der Abgeordneten.",
+      "Der Bundestag tagt im Parlament in Berlin."]),
+    ("Parlament", "CH", "здание парламента (парламентское здание)",
+     ["gebäude", "haus", "besucherdienst"],
+     ["Das Parlamentsgebäude wurde nach einer Renovierung wieder eröffnet.",
+      "Im Bundeshaus tagt das Parlament; der Besucherdienst führt Gruppen durch das Gebäude."]),
+    ("Beamter", "DE", "лицо публично-правовой службы (статус)",
+     ["verbeamtet", "besoldung", "statusrechtlich"],
+     ["Der Beamte ist statusrechtlich angestellt und erhält Besoldung.",
+      "Nach der Verbeamtung wechselte er in das Beamtenverhältnis."]),
+    ("Beamter", "CH", "сотрудник государственной администрации в широком смысле",
+     ["personal", "verwaltung", "angestellte"],
+     ["Die Verwaltung beschäftigte mehrere Beamte im Personalwesen.",
+      "Als Angestellter der Kantonsverwaltung gilt er als Beamter."]),
+]
+
 
 def seed_defaults(db: Session) -> dict:
-    """Создает отсутствующие параметры и пары. Возвращает счетчики добавленного."""
+    """Создает отсутствующие параметры, пары и омонимы. Возвращает счетчики."""
+    from src.db.models import SemanticShift
+
     added_params = 0
     for spec in DEFAULT_PARAMETERS:
         exists = db.query(QueryParameter).filter(QueryParameter.code == spec["code"]).first()
@@ -110,5 +155,22 @@ def seed_defaults(db: Session) -> dict:
         db.add(LexicalPair(concept=concept, de_word=de_w, at_word=at_w, ch_word=ch_w))
         added_pairs += 1
 
+    added_shifts = 0
+    for row in DEFAULT_SEMANTIC_SHIFTS:
+        word, country, meaning, collocations = row[:4]
+        examples = row[4] if len(row) > 4 else []
+        exists = db.query(SemanticShift).filter(
+            SemanticShift.word == word, SemanticShift.country == country,
+            SemanticShift.meaning == meaning).first()
+        if exists:
+            continue
+        db.add(SemanticShift(
+            word=word, country=country, meaning=meaning,
+            collocations=json.dumps(collocations, ensure_ascii=False),
+            examples=json.dumps(examples, ensure_ascii=False),
+        ))
+        added_shifts += 1
+
     db.commit()
-    return {"parameters": added_params, "lexical_pairs": added_pairs}
+    return {"parameters": added_params, "lexical_pairs": added_pairs,
+            "semantic_shifts": added_shifts}

@@ -195,7 +195,110 @@ async def statistics_endpoint(parameter_code: str):
         return {
             "by_country": query_engine.statistics_by_country(db, parameter_code),
             "by_marker": query_engine.statistics_by_marker(db, parameter_code),
+            "resolution": query_engine.resolution_stats(db, parameter_code),
         }
+    finally:
+        db.close()
+
+
+class SemanticShiftPayload(BaseModel):
+    word: str
+    country: str
+    meaning: str
+    collocations: list[str] = []
+    examples: list[str] = []
+    concept: str | None = None
+    note: str | None = None
+
+
+@app.get("/semantic-shifts")
+async def list_semantic_shifts():
+    """Справочник омонимов для P7 (word + country -> значение и маркеры)."""
+    from src.db.models import SemanticShift
+    db = SessionLocal()
+    try:
+        rows = db.query(SemanticShift).order_by(
+            SemanticShift.word, SemanticShift.country).all()
+        return [
+            {
+                "id": r.id,
+                "word": r.word,
+                "country": r.country,
+                "meaning": r.meaning,
+                "collocations": json.loads(r.collocations) if r.collocations else [],
+                "examples": json.loads(r.examples) if r.examples else [],
+                "concept": r.concept,
+                "note": r.note,
+            }
+            for r in rows
+        ]
+    finally:
+        db.close()
+
+
+@app.post("/semantic-shifts")
+async def add_semantic_shift(payload: SemanticShiftPayload):
+    """Добавить или обновить значение омонима (идемпотентно по word+country+meaning)."""
+    from src.db.models import SemanticShift
+    if payload.country.upper() not in ("DE", "AT", "CH"):
+        raise HTTPException(400, "Страна должна быть DE, AT или CH")
+    db = SessionLocal()
+    try:
+        row = db.query(SemanticShift).filter(
+            SemanticShift.word == payload.word,
+            SemanticShift.country == payload.country.upper(),
+            SemanticShift.meaning == payload.meaning).first()
+        if row is None:
+            row = SemanticShift(word=payload.word, country=payload.country.upper(),
+                                meaning=payload.meaning)
+            db.add(row)
+        row.collocations = json.dumps(payload.collocations, ensure_ascii=False)
+        row.examples = json.dumps(payload.examples, ensure_ascii=False)
+        row.concept = payload.concept
+        row.note = payload.note
+        db.commit()
+        return {"id": row.id, "word": row.word, "country": row.country,
+                "updated": True}
+    finally:
+        db.close()
+
+
+@app.delete("/semantic-shifts/{shift_id}")
+async def delete_semantic_shift(shift_id: int):
+    from src.db.models import SemanticShift
+    db = SessionLocal()
+    try:
+        row = db.get(SemanticShift, shift_id)
+        if row is None:
+            raise HTTPException(404, "Запись не найдена")
+        db.delete(row)
+        db.commit()
+        return {"deleted": shift_id}
+    finally:
+        db.close()
+
+
+@app.get("/pending/{parameter_code}")
+async def pending_disambiguation(parameter_code: str):
+    """Спорные вхождения P7, которые правила не разметили (требуют LLM)."""
+    from src.analysis.semantic import pending_hits
+    db = SessionLocal()
+    try:
+        rows = pending_hits(db, parameter_code)
+        return {"total": len(rows), "items": rows[:200]}
+    finally:
+        db.close()
+
+
+@app.post("/disambiguate/{parameter_code}")
+async def disambiguate_endpoint(parameter_code: str):
+    """Один пакетный LLM-запрос по всем спорным вхождениям параметра."""
+    from src.analysis.semantic import disambiguate_pending
+    db = SessionLocal()
+    try:
+        return disambiguate_pending(db, parameter_code)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
     finally:
         db.close()
 
