@@ -81,3 +81,5 @@ watchdog==6.0.0
 weasel==1.0.0
 websockets==16.1.1
 wrapt==2.3.0
+playwright==1.55.0
+camoufox[geoip]==0.4.11
