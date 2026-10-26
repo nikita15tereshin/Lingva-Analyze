@@ -7,6 +7,7 @@ import uuid
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
@@ -339,6 +340,36 @@ async def dictionary_entries(source_key: str = "", status: str = "", limit: int 
         ]
     finally:
         db.close()
+
+
+class LLMSettingsPayload(BaseModel):
+    provider: str | None = None
+    api_key: str | None = None
+    model: str | None = None
+    base_url: str | None = None
+
+
+@app.get("/llm/settings")
+async def llm_settings_get():
+    """Текущие настройки LLM без ключа (только маска и признак наличия)."""
+    from src.analysis.settings import public_view
+    return public_view()
+
+
+@app.post("/llm/settings")
+async def llm_settings_save(payload: LLMSettingsPayload):
+    """Сохраняет провайдера/ключ/модель. Пустой или замаскированный ключ не перезаписывает."""
+    from src.analysis.settings import save, PROVIDERS
+    if payload.provider and payload.provider not in PROVIDERS:
+        raise HTTPException(status_code=400, detail="Неизвестный провайдер")
+    save(
+        provider=payload.provider,
+        api_key=payload.api_key,
+        model=payload.model,
+        base_url=payload.base_url,
+    )
+    from src.analysis.settings import public_view
+    return public_view()
 
 
 @app.post("/dictionary/approve")
