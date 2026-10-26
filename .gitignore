@@ -1,5 +1,7 @@
-__pycache__/
+*.bundle
 *.pyc
+*.bundle
+data/raw/
 venv/
 .venv/
 .env
