@@ -76,6 +76,60 @@ def test_frequency_table(db, indexed_corpus):
     assert {"lemma": "Jänner", "pos": "NOUN", "count": 1} in table
 
 
+def test_seed_creates_frequency_preset(db):
+    counts = seed_defaults(db)
+    from src.db.models import QueryParameter
+    param = db.query(QueryParameter).filter(QueryParameter.code == "FREQ-1-5").first()
+    assert param is not None and param.query_type == "FREQUENCY_RANGE"
+    assert json.loads(param.markers) == {"min": 1, "max": 5}
+    assert counts["parameters"] >= 9
+
+
+def test_frequency_range_and_export(db, indexed_corpus):
+    """Прикол А + экспорт (4.1/4.2): редкие леммы, CSV/XLSX, сводка по корпусу."""
+    import io as _io
+    import pandas as _pd
+    from src.db.models import QueryParameter
+    from src.query.export import (export_parameter_csv, export_workbook_csv,
+                                  export_workbook_xlsx)
+
+    doc_de, doc_at = indexed_corpus
+    param = QueryParameter(code="T-FREQ", name="тест частоты",
+                           query_type="FREQUENCY_RANGE",
+                           markers=json.dumps({"min": 1, "max": 1}))
+    db.add(param)
+    db.commit()
+
+    res = qe.run_parameter(db, param)
+    assert res["hits"] > 0
+    markers = {row["marker"] for row in qe.statistics_by_marker(db, "T-FREQ")}
+    assert any(m.startswith("Jänner") for m in markers)   # x1 в каждом документе
+    assert any(m.startswith("Bericht") for m in markers)  # x1 в DE-документе
+    assert any(m.startswith("Polizist") for m in markers)
+    # Леммы с частотой ровно 1: в DE — все, кроме Jänner (встречается и в AT, но
+    # считается per document, поэтому входит); "." пропущен индексатором (PUNCT).
+    found = {m.split(" x ")[0] for m in markers}
+    expected = {"Jänner", "Polizist", "Bericht", "müssen", "Gesetz", "der",
+                "wohl", "man", "§", "1", "2024", "Bundesheer", "werden"}
+    assert found == expected
+
+    csv_bytes = export_parameter_csv(db, "T-FREQ")
+    frame = _pd.read_csv(_io.BytesIO(csv_bytes))
+    assert "sentence" in frame.columns or frame.empty
+
+    all_csv = export_workbook_csv(db)
+    assert b"T-FREQ" in all_csv
+
+    xlsx_bytes = export_workbook_xlsx(db)
+    assert xlsx_bytes[:2] == b"PK"                        # валидный zip-XLSX
+    sheets = _pd.ExcelFile(_io.BytesIO(xlsx_bytes)).sheet_names
+    assert "Сводка" in sheets
+
+    corpus = qe.corpus_statistics(db)
+    assert any(r["parameter"] == "T-FREQ" and r["country"] in ("DE", "AT")
+               for r in corpus)
+
+
 def test_seed_and_lemma_set(db, indexed_corpus):
     seed_defaults(db)
     param = db.query(type(db).__module__ and __import__("src.db.models", fromlist=["QueryParameter"]).QueryParameter).first() \

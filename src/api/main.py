@@ -6,7 +6,7 @@ import sys
 import uuid
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
@@ -226,6 +226,48 @@ async def export_csv(parameter_code: str):
 
     return StreamingResponse(generate(), media_type="text/csv; charset=utf-8",
                              headers={"Content-Disposition": f'attachment; filename="{parameter_code}.csv"'})
+
+
+@app.get("/statistics")
+async def statistics_all():
+    """Сводка 4.1: попадания каждого параметра по странам."""
+    db = SessionLocal()
+    try:
+        return {"by_parameter_country": query_engine.corpus_statistics(db)}
+    finally:
+        db.close()
+
+
+@app.get("/export/all.csv")
+async def export_all_csv():
+    """Один CSV по всем прогнанным параметрам (колонка parameter)."""
+    from src.query.export import export_workbook_csv
+
+    db = SessionLocal()
+    try:
+        data = export_workbook_csv(db)
+    finally:
+        db.close()
+    if not data:
+        return JSONResponse(status_code=404,
+                            content={"detail": "Нет попаданий ни по одному параметру"})
+    return Response(content=data, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="matrix_all.csv"'})
+
+
+@app.get("/export/workbook.xlsx")
+async def export_workbook_xlsx():
+    """Сводная книга XLSX для передачи в LLM (пункт 4.3 ТЗ)."""
+    from src.query.export import export_workbook_xlsx as build_xlsx
+
+    db = SessionLocal()
+    try:
+        data = build_xlsx(db)
+    finally:
+        db.close()
+    return Response(content=data,
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": 'attachment; filename="matrix_workbook.xlsx"'})
 
 
 # ------------------------------------------------------------------ словари
