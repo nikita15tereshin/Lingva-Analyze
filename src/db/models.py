@@ -116,6 +116,32 @@ class RegionalWord(Base):
     )
 
 
+class SemanticShift(Base):
+    """Омонимы региональных вариантов (пункт 3.2, P7): одно слово - разные значения.
+
+    Для каждого слова задается значение по стране и список колокаций-маркеров,
+    которые однозначно указывают на это значение (Gymnasium: Sport/Geräte -> AT,
+    Schule/Abitur/Maturanten -> DE). Правила обрабатывают уверенные случаи,
+    спорные предложения помечаются как требующие LLM-разбора.
+    """
+
+    __tablename__ = "semantic_shifts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    word = Column(String, index=True, nullable=False)   # лемма: Gymnasium
+    concept = Column(String, nullable=True)             # для справочника: школа / спортзал
+    country = Column(String(2), nullable=False)         # DE / AT / CH
+    meaning = Column(String, nullable=False)            # описание значения
+    collocations = Column(Text, nullable=True)          # JSON: ["Sport", "Geräte", ...]
+    examples = Column(Text, nullable=True)              # JSON: эталонные предложения для векторной линии
+    note = Column(String, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("word", "country", "meaning", name="uq_semantic_shifts_word_country_meaning"),
+        CheckConstraint("country IN ('DE', 'AT', 'CH')", name="ck_semantic_shifts_country"),
+    )
+
+
 class LexicalPair(Base):
     """Пары лексических замен одного понятия в разных вариантах (пункт 3.1, P8)."""
 
@@ -138,7 +164,8 @@ class QueryParameter(Base):
     - WORD_REGEX     регулярка по словоформе (суффикс -in для P9);
     - TEXT_REGEX     регулярка по тексту предложения (параграфы/статьи для P4);
     - LEXICAL_PAIR   подстановка членов пары лексических замен (P8);
-    - DICTIONARY     прогон уникальных лемм через regional_dictionary (P5/P6).
+    - DICTIONARY     прогон уникальных лемм через regional_dictionary (P5/P6);
+    - SEMANTIC_SHIFT омонимы из semantic_shifts: правила + добор LLM (P7).
     """
 
     __tablename__ = "query_parameters"
@@ -164,6 +191,8 @@ class Hit(Base):
     sentence_id = Column(Integer, ForeignKey('sentences.id', ondelete="SET NULL"), nullable=True)
     matched_marker = Column(String, nullable=True)  # какая именно лемма/подстрока сработала
     word_form = Column(String, nullable=True)
+    resolution = Column(String, nullable=True)
+    # для SEMANTIC_SHIFT: rule (определили кодом) / llm_pending (нужен LLM-разбор) / llm (разобрано LLM)
     run_ts = Column(DateTime, default=datetime.utcnow)
 
     parameter = relationship("QueryParameter")

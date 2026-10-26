@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import sys
 
@@ -12,7 +13,7 @@ from sqlalchemy import text as sa_text
 from src.parser.reader import extract_and_normalize
 from src.nlp.processor import process_text
 from src.db.session import SessionLocal, engine
-from src.db.models import Base, Document
+from src.db.models import Base, Document, SemanticShift
 from src.db.crud import (
     create_document,
     save_nlp_data_to_db,
@@ -141,7 +142,9 @@ with tab_matrix:
 
     if st.button("Инициализировать пресеты P1–P9"):
         counts = seed_defaults(SessionLocal())
-        st.success(f"Создано параметров: {counts['parameters']}, пар замен: {counts['lexical_pairs']}")
+        st.success(
+            f"Создано параметров: {counts['parameters']}, пар замен: {counts['lexical_pairs']}, "
+            f"омонимов P7: {counts.get('semantic_shifts', 0)}")
 
     params_db = SessionLocal()
     try:
@@ -182,6 +185,69 @@ with tab_matrix:
             st.dataframe(pd.DataFrame(rows), use_container_width=True)
             csv = pd.DataFrame(rows).to_csv(index=False).encode("utf-8-sig")
             st.download_button("Скачать CSV", csv, file_name=f"{sel_code}.csv", mime="text/csv")
+
+        param_row = None
+        look_db = SessionLocal()
+        try:
+            param_row = look_db.query(QueryParameter).filter(
+                QueryParameter.code == sel_code).first()
+            is_semantic = param_row is not None and param_row.query_type == "SEMANTIC_SHIFT"
+        finally:
+            look_db.close()
+
+        if is_semantic:
+            st.divider()
+            st.caption("P7: гибрид. Уверенные случаи разметил код (rule), спорные ждут LLM (llm_pending)")
+            from src.analysis.semantic import pending_hits, disambiguate_pending
+            disp_db = SessionLocal()
+            try:
+                pend = pending_hits(disp_db, sel_code)
+                st.write(f"Спорных вхождений после прогона: {len(pend)}")
+                if pend:
+                    st.dataframe(pd.DataFrame(pend), use_container_width=True)
+                    if st.button("Разобрать спорные через LLM (один пакетный запрос)"):
+                        try:
+                            stats = disambiguate_pending(disp_db, sel_code)
+                            st.success(
+                                f"Всего: {stats['total']}, определено: {stats['resolved']}, "
+                                f"unknown: {stats['unknown']}, без ответа: {stats['failed']}")
+                        except RuntimeError as exc:
+                            st.error(str(exc))
+                else:
+                    st.info("Спорных нет или параметр еще не прогонялся по корпусу.")
+
+                shifts = disp_db.query(SemanticShift).order_by(
+                    SemanticShift.word, SemanticShift.country).all()
+                st.caption("Справочник омонимов (правится здесь же, кнопкой ниже)")
+                if shifts:
+                    st.dataframe(pd.DataFrame([
+                        {"word": s.word, "страна": s.country, "значение": s.meaning,
+                         "маркеры": s.collocations or ""} for s in shifts
+                    ]), use_container_width=True)
+                with st.expander("Добавить/обновить омоним"):
+                    new_word = st.text_input("Слово (лемма)", key="ss_word")
+                    new_country = st.selectbox("Страна значения", ["DE", "AT", "CH"], key="ss_country")
+                    new_meaning = st.text_input("Значение", key="ss_meaning")
+                    new_cols = st.text_input(
+                        "Колокации-маркеры (через запятую, нижний регистр)", key="ss_cols")
+                    if st.button("Сохранить в справочник"):
+                        if not new_word or not new_meaning:
+                            st.warning("Заполните слово и значение.")
+                        else:
+                            row = disp_db.query(SemanticShift).filter(
+                                SemanticShift.word == new_word,
+                                SemanticShift.country == new_country).first()
+                            if row is None:
+                                row = SemanticShift(word=new_word, country=new_country)
+                                disp_db.add(row)
+                            row.meaning = new_meaning
+                            row.collocations = json.dumps(
+                                [c.strip().lower() for c in new_cols.split(",") if c.strip()],
+                                ensure_ascii=False)
+                            disp_db.commit()
+                            st.success("Сохранено. Прогоните P7 заново.")
+            finally:
+                disp_db.close()
 
     st.divider()
     st.caption("Сводка по корпусу и выгрузка для качественного анализа (пункт 4.3 ТЗ)")

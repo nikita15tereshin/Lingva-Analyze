@@ -25,7 +25,7 @@ from src.db.models import (
 )
 
 QUERY_TYPES = ("LEMMA_SET", "LEMMA_AND", "WORD_REGEX", "TEXT_REGEX",
-               "LEXICAL_PAIR", "DICTIONARY", "FREQUENCY_RANGE")
+               "LEXICAL_PAIR", "DICTIONARY", "FREQUENCY_RANGE", "SEMANTIC_SHIFT")
 
 
 def parse_markers(param: QueryParameter) -> list[dict]:
@@ -279,11 +279,20 @@ RUNNERS = {
 }
 
 
+def _runners_with_semantic() -> dict:
+    """SEMANTIC_SHIFT подключается лениво, чтобы не создавать цикл импортов."""
+    if "SEMANTIC_SHIFT" not in RUNNERS:
+        from src.analysis.semantic import run_semantic_shift
+        RUNNERS["SEMANTIC_SHIFT"] = run_semantic_shift
+    return RUNNERS
+
+
 def run_parameter(db: Session, param: QueryParameter,
                   document_ids: list[int] | None = None,
                   countries: list[str] | None = None) -> dict:
     """Прогон параметра по области корпуса. Повторный запуск заменяет старые hits."""
-    if param.query_type not in RUNNERS:
+    runners = _runners_with_semantic()
+    if param.query_type not in runners:
         raise ValueError(f"Неизвестный тип запроса: {param.query_type}")
 
     doc_ids = _document_scope(db, document_ids, countries)
@@ -291,7 +300,7 @@ def run_parameter(db: Session, param: QueryParameter,
         return {"parameter": param.code, "documents": 0, "hits": 0}
 
     _clear_previous_hits(db, param.id, doc_ids)
-    created = RUNNERS[param.query_type](db, param, doc_ids)
+    created = runners[param.query_type](db, param, doc_ids)
     db.commit()
 
     return {"parameter": param.code, "documents": len(doc_ids), "hits": created}
@@ -321,6 +330,26 @@ def statistics_by_marker(db: Session, parameter_code: str) -> list[dict]:
         .all()
     )
     return [{"marker": marker, "hits": count} for marker, count in rows]
+
+
+def resolution_stats(db: Session, parameter_code: str) -> dict:
+    """Сколько вхождений P7 закрыто правилами, векторами, LLM и осталось спорных."""
+    rows = (
+        db.query(Hit.resolution, func.count(Hit.id))
+        .join(QueryParameter, Hit.parameter_id == QueryParameter.id)
+        .filter(QueryParameter.code == parameter_code)
+        .group_by(Hit.resolution)
+        .all()
+    )
+    stats = {"rule": 0, "vector": 0, "llm": 0, "llm_pending": 0, "other": 0}
+    total = 0
+    for resolution, count in rows:
+        total += count
+        stats[resolution if resolution in stats else "other"] += count
+    stats["total"] = total
+    resolved = stats["rule"] + stats["vector"] + stats["llm"]
+    stats["code_share"] = round(resolved / total, 3) if total else None
+    return stats
 
 
 def corpus_statistics(db: Session) -> list[dict]:
@@ -357,6 +386,7 @@ def hits_with_context(db: Session, parameter_code: str, limit: int = 200) -> lis
             "sentence": text,
             "marker": hit.matched_marker,
             "word_form": hit.word_form,
+            "resolution": hit.resolution,
         }
         for hit, text, filename, external_code, country in rows
     ]
