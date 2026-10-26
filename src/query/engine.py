@@ -323,6 +323,20 @@ def statistics_by_marker(db: Session, parameter_code: str) -> list[dict]:
     return [{"marker": marker, "hits": count} for marker, count in rows]
 
 
+def corpus_statistics(db: Session) -> list[dict]:
+    """Сводка 4.1 по всему корпусу: попаданий каждого параметра по странам."""
+    rows = (
+        db.query(QueryParameter.code, Document.country, func.count(Hit.id))
+        .join(Hit, Hit.parameter_id == QueryParameter.id)
+        .outerjoin(Document, Hit.document_id == Document.id)
+        .group_by(QueryParameter.code, Document.country)
+        .order_by(QueryParameter.code)
+        .all()
+    )
+    return [{"parameter": code, "country": country or "не указана", "hits": count}
+            for code, country, count in rows]
+
+
 def hits_with_context(db: Session, parameter_code: str, limit: int = 200) -> list[dict]:
     """Качественный материал (4.2): предложение целиком + сработавшая форма."""
     rows = (

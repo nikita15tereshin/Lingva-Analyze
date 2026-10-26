@@ -67,6 +67,13 @@ DEFAULT_PARAMETERS = [
         "markers": [r"\b(1[89]\d{2}|20\d{2})\b"],
         "comment": "Прикол Б: годы как отдельный маркер статистики.",
     },
+    {
+        "code": "FREQ-1-5",
+        "name": "Слова с частотой от 1 до 5 в документе",
+        "query_type": "FREQUENCY_RANGE",
+        "markers": {"min": 1, "max": 5},
+        "comment": "Прикол А: редкие леммы (не более 5 вхождений на документ).",
+    },
 ]
 
 DEFAULT_LEXICAL_PAIRS = [

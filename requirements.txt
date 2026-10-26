@@ -1,3 +1,4 @@
+xlsxwriter==3.2.5
 alembic==1.18.5
 altair==6.2.2
 annotated-doc==0.0.5

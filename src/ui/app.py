@@ -183,6 +183,42 @@ with tab_matrix:
             csv = pd.DataFrame(rows).to_csv(index=False).encode("utf-8-sig")
             st.download_button("Скачать CSV", csv, file_name=f"{sel_code}.csv", mime="text/csv")
 
+    st.divider()
+    st.caption("Сводка по корпусу и выгрузка для качественного анализа (пункт 4.3 ТЗ)")
+    sum_db = SessionLocal()
+    try:
+        corpus_rows = query_engine.corpus_statistics(sum_db)
+        if corpus_rows:
+            frame = pd.DataFrame(corpus_rows)
+            pivot = frame.pivot_table(index="parameter", columns="country",
+                                       values="hits", aggfunc="sum", fill_value=0)
+            st.bar_chart(pivot)
+            st.dataframe(pivot.reset_index(), use_container_width=True)
+
+            from src.query.export import export_workbook_csv, export_workbook_xlsx
+            col1, col2 = st.columns(2)
+            col1.download_button(
+                "Скачать все параметры (CSV)",
+                export_workbook_csv(sum_db),
+                file_name="matrix_all.csv", mime="text/csv")
+            col2.download_button(
+                "Скачать сводную книгу (XLSX)",
+                export_workbook_xlsx(sum_db),
+                file_name="matrix_workbook.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+            if st.button("Сравнительный анализ параметра через LLM"):
+                from src.analysis.llm import analyze_matrix_parameter_stream
+                placeholder = st.empty()
+                collected = ""
+                for piece in analyze_matrix_parameter_stream(sel_code):
+                    collected += piece
+                    placeholder.markdown(collected)
+        else:
+            st.info("Попаданий нет. Сначала прогоните параметры по корпусу.")
+    finally:
+        sum_db.close()
+
 with tab_dict:
     st.caption("Пункт 5.3 ТЗ: парсинг внешних словарей (слово-значение) в staging с последующим отбором")
 
