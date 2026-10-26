@@ -93,8 +93,8 @@ active_doc_id = docs[selected_idx].id
 st.title("Lingva-Analyze Dashboard")
 st.caption(f"Активный документ ID: {active_doc_id}")
 
-tab_lexicon, tab_kwic, tab_matrix, tab_dict = st.tabs(
-    ["Лексический индекс", "KWIC-конкорданс", "Матрица параметров", "Словари"]
+tab_lexicon, tab_kwic, tab_matrix, tab_dict, tab_llm = st.tabs(
+    ["Лексический индекс", "KWIC-конкорданс", "Матрица параметров", "Словари", "LLM"]
 )
 
 with tab_lexicon:
@@ -296,3 +296,53 @@ with tab_dict:
         st.caption(f"Всего подтвержденных статей после парсеров: {total_regional}")
     finally:
         dict_db.close()
+
+
+with tab_llm:
+    st.caption("Настройка провайдера и API-ключа для LLM-анализа (пункт 4.3 ТЗ)")
+
+    from src.analysis.settings import PROVIDERS, load_raw, save as save_llm_settings
+
+    current = load_raw()
+
+    provider_names = list(PROVIDERS.keys())
+    sel_provider = st.selectbox(
+        "Провайдер", provider_names,
+        index=provider_names.index(current["provider"]) if current["provider"] in provider_names else 0,
+        key="llm_provider",
+    )
+    defaults = PROVIDERS[sel_provider]
+
+    base_url = st.text_input(
+        "Base URL",
+        value=current["base_url"] if current["provider"] == sel_provider else defaults["base_url"],
+        key="llm_base_url",
+    )
+    model_name = st.text_input(
+        "Модель",
+        value=current["model"] if current["provider"] == sel_provider else defaults["model"],
+        key="llm_model",
+    )
+
+    if current["api_key"]:
+        st.markdown(
+            f"API-ключ сохранен: `{current['api_key'][:3]}{'*' * 12}`. "
+            "Оставьте поле пустым, чтобы не менять его."
+        )
+    else:
+        st.info("API-ключ еще не задан.")
+
+    api_key = st.text_input(
+        "API-ключ", type="password", placeholder="Вставьте ключ провайдера",
+        key="llm_api_key",
+    )
+
+    if st.button("Сохранить настройки LLM"):
+        saved = save_llm_settings(
+            provider=sel_provider,
+            api_key=api_key or None,
+            model=model_name or None,
+            base_url=base_url or None,
+        )
+        shown = f"{saved['api_key'][:3]}{'*' * 12}" if saved["api_key"] else "не задан"
+        st.success(f"Сохранено: {saved['provider']} | {saved['model']} | ключ: {shown}")

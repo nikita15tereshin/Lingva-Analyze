@@ -1,23 +1,34 @@
-import os
 from openai import OpenAI
 
-API_KEY = os.getenv("LLM_API_KEY")
+from src.analysis.settings import load_raw
 
-client = OpenAI(
-    base_url='https://api.tokenrouter.com/v1',
-    api_key=API_KEY if API_KEY else "missing-key",
-)
+
+def _client_and_model() -> tuple[OpenAI, str]:
+    """Собирает клиент из текущих настроек (вкладка LLM / env-дефолты)."""
+    settings = load_raw()
+    client = OpenAI(
+        base_url=settings["base_url"] or None,
+        api_key=settings["api_key"] or "missing-key",
+    )
+    return client, settings["model"]
+
+
+def _not_configured_message() -> str:
+    return (
+        "Ключ LLM не задан. Откройте вкладку LLM в интерфейсе и сохраните "
+        "провайдера с API-ключом либо задайте переменную окружения LLM_API_KEY."
+    )
+
 
 def analyze_semantic_context_stream(word: str, sentence: str, expected_region: str):
     """
     Генератор, который отправляет запрос в LLM и возвращает ответ чанками (потоком).
-    Ключ берется только из переменной окружения LLM_API_KEY.
+    Провайдер, модель и ключ берутся из настроек (вкладка LLM), значения по
+    умолчанию - из переменных окружения.
     """
-    if not API_KEY:
-        yield (
-            "Ключ LLM не задан. Установите переменную окружения LLM_API_KEY "
-            "(в файле .env или через export)."
-        )
+    settings = load_raw()
+    if not settings["api_key"]:
+        yield _not_configured_message()
         return
 
     prompt = f"""
@@ -42,9 +53,10 @@ def analyze_semantic_context_stream(word: str, sentence: str, expected_region: s
     print(f"[LLM Stream] Запрос для слова: '{word}' отправлен...")
     
     try:
+        client, model = _client_and_model()
         # Включаем stream=True и убираем таймаут, чтобы ждать столько, сколько нужно
         response = client.chat.completions.create(
-            model="moonshotai/kimi-k3-free",
+            model=model,
             messages=messages,
             temperature=0.3,
             stream=True 
@@ -68,9 +80,9 @@ def analyze_matrix_parameter_stream(parameter_code: str, max_examples: int = 40)
     from src.db.session import SessionLocal
     from src.query import engine as query_engine
 
-    if not API_KEY:
-        yield ("Ключ LLM не задан. Установите переменную окружения LLM_API_KEY "
-               "(в файле .env или через export).")
+    settings = load_raw()
+    if not settings["api_key"]:
+        yield _not_configured_message()
         return
 
     db = SessionLocal()
@@ -125,8 +137,9 @@ def analyze_matrix_parameter_stream(parameter_code: str, max_examples: int = 40)
     print(f"[LLM Stream] Запрос по параметру '{parameter_code}' отправлен...")
 
     try:
+        client, model = _client_and_model()
         response = client.chat.completions.create(
-            model="moonshotai/kimi-k3-free",
+            model=model,
             messages=messages,
             temperature=0.3,
             stream=True,
