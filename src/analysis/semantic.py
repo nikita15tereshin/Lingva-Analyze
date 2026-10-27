@@ -213,9 +213,15 @@ def run_semantic_shift(db: Session, param: QueryParameter, doc_ids: list[int]) -
         db.query(Document.id, Document.country).filter(Document.id.in_(doc_ids)).all()
     )
 
-    for sentence_id, document_id, lemma, word_form in _occurrence_rows(
-        db, list(words.keys()), None, doc_ids
-    ):
+    # Леммы в БД хранятся с исходным регистром (Gymnasium), ключи правил — в нижнем.
+    rows = []
+    seen_pairs = set()
+    for sent_id, doc_id, lem, wf in _occurrence_rows(db, list(words.keys()), None, doc_ids):
+        if (sent_id, lem.lower()) not in seen_pairs:
+            seen_pairs.add((sent_id, lem.lower()))
+            rows.append((sent_id, doc_id, lem, wf))
+
+    for sentence_id, document_id, lemma, word_form in rows:
         sentence = sentences.get(sentence_id)
         if sentence is None:
             continue

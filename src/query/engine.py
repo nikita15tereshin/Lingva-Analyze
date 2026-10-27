@@ -63,7 +63,8 @@ def _occurrence_rows(db: Session, lemmas: list[str], pos: str | None, doc_ids: l
         db.query(LexicalIndex.sentence_id, Sentence.document_id, Token.lemma, LexicalIndex.word_form)
         .join(Token, LexicalIndex.token_id == Token.id)
         .join(Sentence, LexicalIndex.sentence_id == Sentence.id)
-        .filter(Token.lemma.in_(lemmas), Sentence.document_id.in_(doc_ids))
+        .filter(func.lower(Token.lemma).in_([l.lower() for l in lemmas]),
+                Sentence.document_id.in_(doc_ids))
     )
     if pos:
         q = q.filter(Token.pos == pos)
