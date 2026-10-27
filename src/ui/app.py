@@ -4,6 +4,7 @@ import os
 import sys
 
 import pandas as pd
+import hashlib as _hl
 import streamlit as st
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
@@ -111,9 +112,45 @@ with tab_lexicon:
 
     # Классификация уникальных слов по региональному словарю
     unique_words = list(index_data.keys())
-    result = classify_unique_words(db if False else SessionLocal(), unique_words)
-    st.write("Австрицизмы:", [w["lemma"] for w in result["AT_matches"]][:30])
-    st.write("Гельветизмы:", [w["lemma"] for w in result["CH_matches"]][:30])
+    _cdb = SessionLocal()
+    try:
+        result = classify_unique_words(_cdb, unique_words)
+    finally:
+        _cdb.close()
+
+    matches = (
+        [{"lemma": m["lemma"], "meaning": m.get("standard_de", ""), "type": "Австрицизм"}
+         for m in result["AT_matches"]]
+        + [{"lemma": m["lemma"], "meaning": m.get("standard_de", ""), "type": "Гельветизм"}
+           for m in result["CH_matches"]]
+    )
+    st.write(f"Регионализмов в документе: {len(matches)}")
+
+    with st.expander("Найденные слова и их контексты"):
+        if not matches:
+            st.write("Совпадений со словарем нет.")
+        else:
+            sel = st.selectbox(
+                "Слово",
+                [m["lemma"] for m in matches],
+                key="lex_word_select",
+            )
+            meaning = next((m["meaning"] for m in matches if m["lemma"] == sel), "")
+            if meaning:
+                st.caption(f"Значение по словарю: {meaning}")
+            _sdb = SessionLocal()
+            try:
+                contexts = get_contexts_for_lemma(_sdb, sel, active_doc_id)
+            finally:
+                _sdb.close()
+            if not contexts:
+                st.write("Контексты не найдены.")
+            for ctx in contexts[:15]:
+                st.markdown(f"**{ctx['word_form']}** (позиция {ctx['position']})")
+                st.write(ctx["target_sentence"])
+                prev_next = ctx["full_context"].replace(ctx["target_sentence"], "").strip()
+                if prev_next:
+                    st.caption(f"Соседние предложения: {prev_next[:300]}")
 
 with tab_kwic:
     lemma_query = st.text_input("Лемма для поиска контекстов", value="Bundeswehr")
@@ -125,7 +162,8 @@ with tab_kwic:
             st.markdown(f"**{ctx['word_form']}** (позиция {ctx['position']})")
             st.write(ctx["target_sentence"])
 
-            if st.button("Объяснить через LLM", key=f"llm_{ctx['position']}_{hash(ctx['target_sentence'])}"):
+            _key = _hl.md5(f"{lemma_query}_{ctx['position']}_{ctx['word_form']}".encode()).hexdigest()[:12]
+            if st.button("Объяснить через LLM", key=f"llm_{_key}"):
                 placeholder = st.empty()
                 full_response = ""
                 for chunk in analyze_semantic_context_stream(
