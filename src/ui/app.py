@@ -107,7 +107,7 @@ with tab_lexicon:
     df = pd.DataFrame(freq_rows)
     max_freq = st.number_input("Прикол А: показать только леммы с частотой не выше", value=5, min_value=1)
     filtered = df[df["count"] <= max_freq] if not df.empty else df
-    st.dataframe(filtered, use_container_width=True)
+    st.dataframe(filtered, width="stretch")
     st.write(f"Уникальных лемм: {len(index_data)}")
 
     # Классификация уникальных слов по региональному словарю
@@ -218,9 +218,9 @@ with tab_matrix:
         if by_country:
             st.bar_chart(pd.DataFrame(by_country).set_index("country"))
         if by_marker:
-            st.dataframe(pd.DataFrame(by_marker), use_container_width=True)
+            st.dataframe(pd.DataFrame(by_marker), width="stretch")
         if rows:
-            st.dataframe(pd.DataFrame(rows), use_container_width=True)
+            st.dataframe(pd.DataFrame(rows), width="stretch")
             csv = pd.DataFrame(rows).to_csv(index=False).encode("utf-8-sig")
             st.download_button("Скачать CSV", csv, file_name=f"{sel_code}.csv", mime="text/csv")
 
@@ -242,7 +242,7 @@ with tab_matrix:
                 pend = pending_hits(disp_db, sel_code)
                 st.write(f"Спорных вхождений после прогона: {len(pend)}")
                 if pend:
-                    st.dataframe(pd.DataFrame(pend), use_container_width=True)
+                    st.dataframe(pd.DataFrame(pend), width="stretch")
                     if st.button("Разобрать спорные через LLM (один пакетный запрос)"):
                         try:
                             stats = disambiguate_pending(disp_db, sel_code)
@@ -261,7 +261,7 @@ with tab_matrix:
                     st.dataframe(pd.DataFrame([
                         {"word": s.word, "страна": s.country, "значение": s.meaning,
                          "маркеры": s.collocations or ""} for s in shifts
-                    ]), use_container_width=True)
+                    ]), width="stretch")
                 with st.expander("Добавить/обновить омоним"):
                     new_word = st.text_input("Слово (лемма)", key="ss_word")
                     new_country = st.selectbox("Страна значения", ["DE", "AT", "CH"], key="ss_country")
@@ -297,7 +297,7 @@ with tab_matrix:
             pivot = frame.pivot_table(index="parameter", columns="country",
                                        values="hits", aggfunc="sum", fill_value=0)
             st.bar_chart(pivot)
-            st.dataframe(pivot.reset_index(), use_container_width=True)
+            st.dataframe(pivot.reset_index(), width="stretch")
 
             from src.query.export import export_workbook_csv, export_workbook_xlsx
             col1, col2 = st.columns(2)
@@ -381,7 +381,7 @@ with tab_dict:
             df_pending = pd.DataFrame(
                 [{"id": r.id, "Термин": r.term, "Определение": r.definition[:160],
                   "Регион": r.region} for r in pending_rows])
-            st.dataframe(df_pending, use_container_width=True, height=240)
+            st.dataframe(df_pending, width="stretch", height=240)
             if st.button("Подтвердить и перенести в рабочий словарь"):
                 moved = approve_entries(dict_db, ids=[r.id for r in pending_rows])
                 st.success(f"Перенесено в regional_dictionary: {moved}")
@@ -394,7 +394,7 @@ with tab_dict:
                 df_rej = pd.DataFrame(
                     [{"Термин": r.term, "Причина": r.note or r.status}
                      for r in rejected[:200]])
-                st.dataframe(df_rej, use_container_width=True)
+                st.dataframe(df_rej, width="stretch")
 
         total_regional = dict_db.query(DictionaryEntry).filter_by(status="approved").count()
         st.caption(f"Всего подтвержденных статей после парсеров: {total_regional}")

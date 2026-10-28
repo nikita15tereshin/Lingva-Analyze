@@ -14,6 +14,9 @@
 import re
 import unicodedata
 
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from src.db.models import DictionaryEntry, RegionalWord
@@ -58,52 +61,118 @@ def validate_entry(entry: DictEntry, spec_validate: str | None,
     return "pending", None
 
 
+def _upsert_insert(engine: Engine, values: list[dict]):
+    """INSERT ... ON CONFLICT (term, region, source_key) DO NOTHING.
+
+    Для PostgreSQL и SQLite используется диалектный on_conflict_do_nothing;
+    для прочих диалектов — обычный insert с последующей фильтрацией
+    IntegrityError на уровне вызывающего кода не требуется (в проекте БД — PG).
+    """
+    dialect = engine.dialect.name
+    if dialect == "postgresql":
+        stmt = pg_insert(DictionaryEntry.__table__).values(values)
+        return stmt.on_conflict_do_nothing(
+            index_elements=["term", "region", "source_key"]
+        )
+    if dialect == "sqlite":
+        stmt = sqlite_insert(DictionaryEntry.__table__).values(values)
+        return stmt.on_conflict_do_nothing(
+            index_elements=["term", "region", "source_key"]
+        )
+    return DictionaryEntry.__table__.insert().values(values)
+
+
 def load_entries(db: Session, entries: list[DictEntry], source_key: str,
                  spec_validate: str | None, replace_source: bool = True) -> dict:
-    """Кладет результаты парсинга в staging. Повторный запуск того же
-    источника заменяет его неотобранные статьи (идемпотентность обновления)."""
+    """Кладет результаты парсинга в staging идемпотентно.
+
+    Повторный синк того же источника обновляет definition/status/note у уже
+    известных статей, но никогда не трогает статьи со статусом approved
+    (они могли быть отредактированы вручную) и не создает дубликатов по
+    уникальному ключу (term, region, source_key). Запись идет батчем через
+    ON CONFLICT DO NOTHING, поэтому одновременная вставка из параллельного
+    процесса не роняет синхронизацию на IntegrityError.
+    """
     de_terms = {r.lemma for r in db.query(RegionalWord).filter_by(region="DE")}
-    stats = {"inserted": 0, "skipped": 0, "by_status": {}}
+    stats = {"inserted": 0, "updated": 0, "skipped": 0, "by_status": {}}
 
-    if replace_source:
-        db.query(DictionaryEntry).filter_by(
-            source_key=source_key, status="pending"
-        ).delete(synchronize_session=False)
-
-    seen_in_batch: set[tuple[str, str]] = set()
+    rows: dict[tuple[str, str], dict] = {}
     for e in entries:
         status, note = validate_entry(e, spec_validate, de_terms)
-        key = (e.term.lower(), e.region)
-        if key in seen_in_batch:
+        key = (e.term.strip(), e.region)
+        if key in rows:  # дубликаты внутри одного прогона парсера
             stats["skipped"] += 1
             continue
-        seen_in_batch.add(key)
-        row = DictionaryEntry(
-            term=e.term, definition=e.definition, region=e.region,
-            source_key=source_key, status=status, note=note,
-        )
-        db.merge(row)  # unique(term, region, source_key) — повтор не дублирует
-        stats["inserted"] += 1
+        rows[key] = {
+            "term": e.term.strip(), "definition": e.definition.strip(),
+            "region": e.region, "source_key": source_key,
+            "status": status, "note": note,
+        }
         stats["by_status"][status] = stats["by_status"].get(status, 0) + 1
+
+    if not rows:
+        db.commit()
+        return stats
+
+    value_list = list(rows.values())
+    if replace_source:
+        # Строки, которые будут перезаписаны upsert'ом (все, кроме approved),
+        # удаляем до вставки: так чистятся устаревшие статьи источника.
+        db.query(DictionaryEntry).filter(
+            DictionaryEntry.source_key == source_key,
+            DictionaryEntry.status != "approved",
+            DictionaryEntry.term.in_([v["term"] for v in value_list]),
+            DictionaryEntry.region.in_([v["region"] for v in value_list]),
+        ).delete(synchronize_session=False)
+        db.flush()
+
+    result = db.execute(_upsert_insert(db.get_bind(), value_list))
+    inserted = result.rowcount if result.rowcount is not None else len(value_list)
+    stats["inserted"] = max(inserted, 0)
+    stats["updated"] = max(len(value_list) - stats["inserted"], 0)
     db.commit()
     return stats
 
 
 def approve_entries(db: Session, ids: list[int] | None = None,
                     source_key: str | None = None) -> int:
-    """Перенос подтвержденных статей из staging в рабочий regional_dictionary."""
+    """Перенос подтвержденных статей из staging в рабочий regional_dictionary.
+
+    Уникальность (lemma, region) гарантируется частичным уникальным индексом
+    uq_regional_word_lemma_region: проверка SELECT + db.add здесь небезопасна
+    при конкурентном аппруве, поэтому вставка идет через ON CONFLICT DO NOTHING,
+    а количество реально добавленных строк берется из rowcount.
+    """
     q = db.query(DictionaryEntry).filter(DictionaryEntry.status == "pending")
     if ids:
         q = q.filter(DictionaryEntry.id.in_(ids))
     if source_key:
         q = q.filter(DictionaryEntry.source_key == source_key)
-    count = 0
-    for row in q.all():
-        exists = db.query(RegionalWord).filter_by(lemma=row.term, region=row.region).first()
-        if not exists:
-            db.add(RegionalWord(lemma=row.term, region=row.region,
-                                standard_de=row.definition))
-            count += 1
-        row.status = "approved"
+    rows = q.all()
+    if not rows:
+        return 0
+
+    values = [{"lemma": r.term, "region": r.region, "standard_de": r.definition}
+              for r in rows]
+    dialect = db.get_bind().dialect.name
+    if dialect in ("postgresql", "sqlite"):
+        ins = (pg_insert if dialect == "postgresql" else sqlite_insert)(
+            RegionalWord.__table__
+        ).values(values)
+        ins = ins.on_conflict_do_nothing(index_elements=["lemma", "region"])
+        result = db.execute(ins)
+        count = result.rowcount or 0
+    else:  # pragma: no cover - резервный путь для тестовой среды без upsert
+        existing = {
+            (l, g) for l, g in db.query(RegionalWord.lemma, RegionalWord.region).all()
+        }
+        count = 0
+        for v in values:
+            if (v["lemma"], v["region"]) not in existing:
+                db.add(RegionalWord(**v))
+                existing.add((v["lemma"], v["region"]))
+                count += 1
+    for r in rows:
+        r.status = "approved"
     db.commit()
     return count
