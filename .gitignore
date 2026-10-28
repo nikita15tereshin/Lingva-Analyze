@@ -1,1 +1,6 @@
-*.bundle
+__pycache__/
+*.pyc
+venv/
+.venv/
+.env
+.env.local
