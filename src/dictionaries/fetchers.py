@@ -69,12 +69,16 @@ def fetch_pdf_bytes(url: str, timeout: int = 60) -> bytes:
 
 def fetch_html_headless(url: str, selector: str | None = None,
                         wait_ms: int = 3500) -> str:
-    """Рендер через camoufox (предпочтительно) или chromium playwright."""
+    """Рендер через camoufox (предпочтительно) или chromium playwright.
+
+    Навигация ограничена таймаутом 30 секунд: зависший сайт не должен
+    вешать процесс синхронизации словарей целиком.
+    """
     try:
         from camoufox.sync_api import Camoufox
         with Camoufox(headless=True) as browser:
             page = browser.new_page()
-            page.goto(url, wait_until="domcontentloaded")
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
             if selector:
                 page.wait_for_selector(selector, timeout=wait_ms)
             else:
@@ -88,7 +92,7 @@ def fetch_html_headless(url: str, selector: str | None = None,
         try:
             page = browser.new_page(extra_http_headers={
                 k: v for k, v in DEFAULT_HEADERS.items() if k != "User-Agent"})
-            page.goto(url, wait_until="domcontentloaded")
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
             if selector:
                 page.wait_for_selector(selector, timeout=wait_ms)
             else:
