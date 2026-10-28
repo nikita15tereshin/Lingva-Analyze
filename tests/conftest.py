@@ -16,7 +16,7 @@ except ImportError:
 
     _spacy_stub = types.ModuleType("spacy")
 
-    def _load_stub(name):
+    def _load_stub(name, *args, **kwargs):
         raise OSError(f"spaCy model {name} is not available in the test environment")
 
     _spacy_stub.load = _load_stub
