@@ -81,9 +81,9 @@ SOURCES: list[SourceSpec] = [
                "https://www.digitaleschweiz.ch/markt/security-finder-schweiz/security-finder-glossar/",
                "CH", "html_table"),
     SourceSpec("ch_termdat", "Termdat BK (admin.ch)",
-               "https://termdat.admin.ch/rest/v1/concepts?language=de-CH&limit=100",
-               "CH", "termdat_api",
-               note="termdat.bk.admin.ch — SPA; данные берутся из публичного REST API"),
+               "https://termdat.bk.admin.ch/",
+               "CH", "termdat_api", headless=True,
+               note="SPA; перехват XHR/JSON + поиск через браузер"),
     # --- Общие (три страны) ---
     SourceSpec("all_ppf", "PPF Glossar DE/AT/CH",
                "https://www.ppfgermany.de/glossar",

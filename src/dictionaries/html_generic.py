@@ -112,9 +112,14 @@ def parse_dlists(doc, source_key: str, region: str) -> list[DictEntry]:
 def parse_accordions(doc, source_key: str, region: str) -> list[DictEntry]:
     """Аккордеоны gov-сайтов: button[aria-controls=X] + панель #X."""
     entries: list[DictEntry] = []
+    nav_noise = {"menü", "menu", "suche", "search", "navigation", "cookie", "cookies"}
     for btn in doc.xpath("//button[@aria-controls] | //a[@aria-controls]"):
+        if btn.xpath("ancestor::nav | ancestor::header | ancestor::footer"):
+            continue
         panel_id = btn.get("aria-controls")
         term = btn.text_content().strip()
+        if term.lower() in nav_noise:
+            continue
         panels = doc.xpath(f'//*[@id="{panel_id}"]')
         if panels and term and len(term) <= 90:
             definition = panels[0].text_content().strip()

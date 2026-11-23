@@ -10,6 +10,7 @@ headless_available() возвращает False, а open_browser бросает 
 sync_source помечает источник failed_browser, как и раньше.
 """
 
+import random
 import threading
 
 from src.dictionaries.base import DEFAULT_HEADERS, NAV_TIMEOUT_MS
@@ -77,7 +78,7 @@ def render(url: str, selector: str | None = None,
         if selector:
             page.wait_for_selector(selector, timeout=wait_ms)
         else:
-            page.wait_for_timeout(wait_ms)
+            page.wait_for_timeout(random.randint(1000, 3000))
         return page.content()
     finally:
         page.close()
