@@ -42,7 +42,7 @@ def _table_to_lines(table) -> list[str]:
     return lines
 
 
-def read_pdf(file_obj) -> str:
+def read_pdf(file_obj, extract_tables: bool = True) -> str:
     """Извлечение текста из PDF через PyMuPDF, таблицы — отдельно построчно."""
     if isinstance(file_obj, str):
         with open(file_obj, "rb") as f:
@@ -52,11 +52,12 @@ def read_pdf(file_obj) -> str:
     parts = []
     for page in doc:
         parts.append(page.get_text("text"))
-        try:
-            for tbl in page.find_tables().tables:
-                parts.extend(_table_to_lines(tbl))
-        except Exception:
-            pass  # если разбор таблиц не удался, ограничиваемся обычным текстом
+        if extract_tables:
+            try:
+                for tbl in page.find_tables().tables:
+                    parts.extend(_table_to_lines(tbl))
+            except Exception:
+                pass  # если разбор таблиц не удался, ограничиваемся обычным текстом
     doc.close()
     return "\n".join(parts)
 
@@ -77,7 +78,7 @@ def read_docx(file_obj) -> str:
     return " ".join(text)
 
 
-def extract_and_normalize(file_obj, filename: str, normalize: bool = True) -> str:
+def extract_and_normalize(file_obj, filename: str, normalize: bool = True, extract_tables: bool = True) -> str:
     """
     Главная функция: определяет формат файла по имени,
     читает его из памяти или с диска и нормализует.
@@ -87,7 +88,7 @@ def extract_and_normalize(file_obj, filename: str, normalize: bool = True) -> st
     if ext == '.txt':
         raw_text = read_txt(file_obj)
     elif ext == '.pdf':
-        raw_text = read_pdf(file_obj)
+        raw_text = read_pdf(file_obj, extract_tables=extract_tables)
     elif ext == '.docx':
         raw_text = read_docx(file_obj)
     else:
