@@ -152,6 +152,35 @@ with tab_lexicon:
                 if prev_next:
                     st.caption(f"Соседние предложения: {prev_next[:300]}")
 
+    st.divider()
+    st.subheader("Качественный LLM-анализ документа (ТЗ п. 6)")
+    st.caption("Структура, тональность, главные угрозы, отношение к РФ/КНР, метафоры")
+    if st.button("Сделать LLM-анализ документа", key="btn_doc_llm_analysis"):
+        from src.analysis.llm import analyze_document_qualitative
+        with st.spinner("LLM анализирует документ..."):
+            _ldb = SessionLocal()
+            try:
+                res = analyze_document_qualitative(_ldb, active_doc_id)
+                st.session_state[f"llm_doc_{active_doc_id}"] = res
+            except Exception as exc:
+                st.error(str(exc))
+            finally:
+                _ldb.close()
+
+    cached_llm = st.session_state.get(f"llm_doc_{active_doc_id}")
+    if cached_llm:
+        analysis = cached_llm.get("analysis", {})
+        if "raw_response" in analysis:
+            st.markdown(analysis["raw_response"])
+        else:
+            st.json(analysis)
+        st.download_button(
+            "Скачать JSON-анализ",
+            json.dumps(cached_llm, ensure_ascii=False, indent=2).encode("utf-8"),
+            file_name=f"llm_analysis_doc_{active_doc_id}.json",
+            mime="application/json",
+        )
+
 with tab_kwic:
     lemma_query = st.text_input("Лемма для поиска контекстов", value="Bundeswehr")
     if lemma_query and st.button("Показать KWIC"):

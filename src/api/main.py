@@ -505,6 +505,21 @@ async def compare_documents_endpoint(payload: ComparePayload):
         db.close()
 
 
+@app.post("/api/documents/{doc_id}/llm-analysis")
+async def document_llm_analysis_endpoint(doc_id: int):
+    from src.analysis.llm import analyze_document_qualitative
+
+    db = SessionLocal()
+    try:
+        return analyze_document_qualitative(db, doc_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    finally:
+        db.close()
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("src.api.main:app", host="0.0.0.0", port=8000, reload=True)
