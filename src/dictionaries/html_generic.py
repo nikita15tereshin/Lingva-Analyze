@@ -150,11 +150,30 @@ def parse_cards(doc, source_key: str, region: str) -> list[DictEntry]:
     return entries
 
 
+def parse_headings(doc, source_key: str, region: str) -> list[DictEntry]:
+    """Глоссарии вида <h2>/<h3>/<h4>Термин</h4><p>Определение</p>."""
+    entries: list[DictEntry] = []
+    for h in doc.xpath("//h2 | //h3 | //h4 | //dt"):
+        if h.xpath("ancestor::nav | ancestor::header | ancestor::footer"):
+            continue
+        term = h.text_content().strip()
+        if not term or len(term) > 80 or len(term.split()) > 6:
+            continue
+        nxt = h.getnext()
+        if nxt is None or nxt.tag not in ("p", "div", "dd"):
+            continue
+        definition = nxt.text_content().strip()
+        if len(definition) >= 15:
+            entries.append(make_entry(term, definition, region, source_key))
+    return entries
+
+
 MODES = {
     "table": parse_tables,
     "dl": parse_dlists,
     "accordion": parse_accordions,
     "cards": parse_cards,
+    "headings": parse_headings,
 }
 
 
@@ -173,10 +192,13 @@ def parse_html(html_text: str, source_key: str, region: str,
         raise FetchError(f"HTML не разбирается ({e})") from e
     if pair_mode and pair_mode in MODES:
         if pair_mode == "table":
-            return parse_tables(doc, source_key, region, selector)
-        return MODES[pair_mode](doc, source_key, region)
+            res = parse_tables(doc, source_key, region, selector)
+        else:
+            res = MODES[pair_mode](doc, source_key, region)
+        if len(res) >= 3:
+            return res
     # fallback: пробуем все режимы, берём первый с содержательным результатом
-    for fn in (parse_tables, parse_dlists, parse_accordions, parse_cards):
+    for fn in (parse_tables, parse_dlists, parse_accordions, parse_cards, parse_headings):
         entries = fn(doc, source_key, region)
         if len(entries) >= 3:
             return entries

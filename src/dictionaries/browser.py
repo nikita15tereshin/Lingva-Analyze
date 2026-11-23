@@ -76,7 +76,10 @@ def render(url: str, selector: str | None = None,
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
         if selector:
-            page.wait_for_selector(selector, timeout=wait_ms)
+            try:
+                page.wait_for_selector(selector, timeout=wait_ms)
+            except Exception:
+                page.wait_for_timeout(random.randint(1000, 3000))
         else:
             page.wait_for_timeout(random.randint(1000, 3000))
         return page.content()
