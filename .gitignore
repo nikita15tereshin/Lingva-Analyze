@@ -1,2 +1,8 @@
 __pycache__/
 *.pyc
+
+.env
+repomix-output.xml
+alembic.ini.save
+data/test*
+data/dictionaries/

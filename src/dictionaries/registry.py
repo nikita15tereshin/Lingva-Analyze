@@ -10,12 +10,14 @@ fetchers.extract_entries, и новый тип источника требова
 from src.dictionaries.base import DictEntry, FetchError, SourceStrategy
 from src.dictionaries.html_generic import strategy as html_strategy
 from src.dictionaries.pdf import strategy as pdf_strategy
+from src.dictionaries.termdat import strategy as termdat_strategy
 
 # соответствие поля SourceSpec.extraction -> стратегия
 _BY_EXTRACTION: dict[str, SourceStrategy] = {
     "pdf_glossary": pdf_strategy,
     "html_table": html_strategy,
     "html_terms": html_strategy,
+    "termdat_api": termdat_strategy,
 }
 
 _FALLBACK = html_strategy
@@ -41,9 +43,6 @@ def extract_entries(spec, headless: bool | None = None) -> list[DictEntry]:
     Аргумент headless позволяет UI/API форсировать браузерный рендер;
     None — решение по флагу самого источника.
     """
-    if spec.extraction == "termdat_api":
-        from src.dictionaries.termdat_legacy import parse_termdat
-        return parse_termdat(spec.key)
     strategy = resolve(spec)
     if headless is not None and hasattr(spec, "headless"):
         spec = _with_headless(spec, headless)

@@ -73,13 +73,16 @@ def parse_pdf_lines(lines: list[str], region: str, source_key: str) -> list[Dict
         pending_term, buf = None, []
 
     for line in lines:
+        if NOISE_LINE.match(line):
+            continue
         m = TERM_LINE.match(line)
         if m:
             flush()
             entries.append(make_entry(m.group("term"), m.group("def"),
                                       region, source_key))
             continue
-        is_new_term = (len(line) <= 80 and TERM_CANDIDATE.fullmatch(line)
+        is_new_term = (len(line) <= 50 and len(line.split()) <= 3
+                       and TERM_CANDIDATE.fullmatch(line)
                        and not line.endswith("."))
         if pending_term is not None:
             if is_new_term:
@@ -124,7 +127,7 @@ class PdfGlossaryStrategy(SourceStrategy):
         pdf_bytes = self.download(spec.url)
         lines = _extract_text(pdf_bytes)
         entries = parse_pdf_lines(lines, spec.region, spec.key)
-        if len(entries) < 3:
+        if len(entries) < 2:
             raise FetchError(
                 f"распознано только {len(entries)} пар термин-определение; "
                 "проверьте макет глоссария вручную")

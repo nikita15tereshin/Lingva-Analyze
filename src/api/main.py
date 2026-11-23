@@ -487,6 +487,39 @@ async def approve_dictionary_entries(payload: dict):
         db.close()
 
 
+class ComparePayload(BaseModel):
+    doc_a_id: int
+    doc_b_id: int
+
+
+@app.post("/api/compare")
+async def compare_documents_endpoint(payload: ComparePayload):
+    from src.query.compare import compare_documents
+
+    db = SessionLocal()
+    try:
+        return compare_documents(db, payload.doc_a_id, payload.doc_b_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    finally:
+        db.close()
+
+
+@app.post("/api/documents/{doc_id}/llm-analysis")
+async def document_llm_analysis_endpoint(doc_id: int):
+    from src.analysis.llm import analyze_document_qualitative
+
+    db = SessionLocal()
+    try:
+        return analyze_document_qualitative(db, doc_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    finally:
+        db.close()
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("src.api.main:app", host="0.0.0.0", port=8000, reload=True)

@@ -173,3 +173,88 @@ def analyze_matrix_parameter_stream(parameter_code: str, max_examples: int = 40)
     except Exception as e:
         print(f"[LLM Stream] Ошибка: {str(e)}")
         yield f"\n\nОшибка при обращении к нейросети: {str(e)}"
+
+def _sample_document_text(sentences: list[str], max_chars: int = 24000) -> str:
+    full_text = " ".join(sentences)
+    if len(full_text) <= max_chars:
+        return full_text
+    part = max_chars // 3
+    head = full_text[:part]
+    mid_start = max(0, (len(full_text) - part) // 2)
+    mid = full_text[mid_start:mid_start + part]
+    tail = full_text[-part:]
+    return (
+        head
+        + " [...] [СЕРЕДИНА ДОКУМЕНТА] [...] "
+        + mid
+        + " [...] [КОНЦОВКА ДОКУМЕНТА] [...] "
+        + tail
+    )
+
+
+def _parse_json_response(raw: str) -> dict:
+    import json
+    import re
+
+    cleaned = raw.strip()
+    m = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, flags=re.S)
+    if m:
+        cleaned = m.group(1).strip()
+    try:
+        data = json.loads(cleaned)
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError:
+        pass
+    return {"raw_response": raw}
+
+
+def analyze_document_qualitative(
+    db,
+    doc_id: int,
+    llm_call=None,
+    max_chars: int = 24000,
+) -> dict:
+    # Пункт 6 ТЗ: структура, тональность, главные угрозы, отношение к РФ/КНР, стилистика
+    from src.db.models import Document, Sentence
+
+    doc = db.get(Document, doc_id)
+    if doc is None:
+        raise ValueError(f"Документ с ID {doc_id} не найден")
+
+    rows = (
+        db.query(Sentence.text)
+        .filter(Sentence.document_id == doc_id)
+        .order_by(Sentence.sentence_number)
+        .all()
+    )
+    sentences = [r[0] for r in rows if r[0]]
+    if not sentences:
+        raise ValueError(f"В документе ID {doc_id} нет проиндексированных предложений")
+
+    excerpt = _sample_document_text(sentences, max_chars=max_chars)
+    prompt = (
+        "Ты эксперт по политической лингвистике и анализу официально-деловых "
+        "документов немецкоязычных стран (DE/AT/CH). "
+        f"Проанализируй документ: {doc.filename} (страна: {doc.country or "не указана"}, "
+        f"всего предложений в корпусе: {len(sentences)}). "
+        "Верни СТРОГО валидный JSON без пояснений вне JSON со следующими ключами: "
+        "1) structure (объект: chapters, estimated_scope, visuals_and_tables), "
+        "2) tone (объект: main_focus, emotionality, summary), "
+        "3) main_threats (список строк: главные угрозы на первом плане — шпионаж, терроризм, экстремизм и т.д.), "
+        "4) geopolitical_attitude (объект: russia, china, other_countries), "
+        "5) stylistic_notes (объект: metaphors, historical_references). "
+        "Текст документа (фрагмент): " + excerpt
+    )
+
+    caller = llm_call or complete_once
+    raw = caller(prompt)
+    parsed = _parse_json_response(raw)
+
+    return {
+        "doc_id": doc.id,
+        "filename": doc.filename,
+        "country": doc.country,
+        "sentences_count": len(sentences),
+        "analysis": parsed,
+    }

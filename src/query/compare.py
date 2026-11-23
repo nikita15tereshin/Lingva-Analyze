@@ -1,0 +1,85 @@
+# Сравнительный анализ двух документов (Этап 3).
+
+from sqlalchemy.orm import Session
+
+from src.analysis.compare import find_unique_lemmas
+from src.analysis.context import get_contexts_for_lemma
+from src.db.crud import get_document_index_from_db
+from src.db.models import DictionaryEntry, Document, RegionalWord
+
+
+def _load_approved_dictionary(db: Session) -> dict[str, dict]:
+    # Объединяем рабочий словарь regional_dictionary и подтвержденные статьи dictionary_entries
+    lookup: dict[str, dict] = {}
+    for row in db.query(RegionalWord).all():
+        key = row.lemma.strip().lower()
+        if key:
+            lookup[key] = {
+                "region": row.region,
+                "meaning": row.standard_de or "",
+            }
+    for row in db.query(DictionaryEntry).filter(DictionaryEntry.status == "approved").all():
+        key = row.term.strip().lower()
+        if key and key not in lookup:
+            lookup[key] = {
+                "region": row.region,
+                "meaning": row.definition or "",
+            }
+    return lookup
+
+
+def _enrich_unique_lemmas(
+    db: Session,
+    doc_id: int,
+    unique_lemmas: list[str],
+    dict_lookup: dict[str, dict],
+    max_contexts: int = 5,
+) -> list[dict]:
+    items: list[dict] = []
+    for lemma in unique_lemmas:
+        info = dict_lookup.get(lemma.lower())
+        if not info:
+            continue
+        contexts = get_contexts_for_lemma(db, lemma, doc_id)
+        sentences = [c["target_sentence"] for c in contexts[:max_contexts]]
+        items.append({
+            "lemma": lemma,
+            "region": info["region"],
+            "meaning": info["meaning"],
+            "contexts": sentences,
+        })
+    return items
+
+
+def compare_documents(db: Session, doc_a_id: int, doc_b_id: int) -> dict:
+    doc_a = db.get(Document, doc_a_id)
+    if doc_a is None:
+        raise ValueError(f"Документ A (id={doc_a_id}) не найден")
+    doc_b = db.get(Document, doc_b_id)
+    if doc_b is None:
+        raise ValueError(f"Документ B (id={doc_b_id}) не найден")
+
+    index_a = get_document_index_from_db(db, doc_a_id)
+    index_b = get_document_index_from_db(db, doc_b_id)
+    diff = find_unique_lemmas(index_a, index_b)
+
+    dict_lookup = _load_approved_dictionary(db)
+
+    return {
+        "doc_a": {
+            "id": doc_a.id,
+            "filename": doc_a.filename,
+            "country": doc_a.country,
+            "external_code": doc_a.external_code,
+        },
+        "doc_b": {
+            "id": doc_b.id,
+            "filename": doc_b.filename,
+            "country": doc_b.country,
+            "external_code": doc_b.external_code,
+        },
+        "unique_a_total": len(diff["unique_A"]),
+        "unique_b_total": len(diff["unique_B"]),
+        "unique_a_regional": _enrich_unique_lemmas(db, doc_a_id, diff["unique_A"], dict_lookup),
+        "unique_b_regional": _enrich_unique_lemmas(db, doc_b_id, diff["unique_B"], dict_lookup),
+    }

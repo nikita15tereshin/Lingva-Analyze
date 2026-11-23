@@ -31,57 +31,73 @@ def create_document(
 
 def save_nlp_data_to_db(db: Session, doc_id: int, nlp_data: dict):
     """
-    Сохраняет предложения и лексический индекс.
+    Сохраняет предложения и лексический индекс пакетно (для больших документов).
 
-    Позиция считается по реальным словам (PUNCT не индексируется), заодно
+    Позиция считается по реальным словам (PUNCT/SPACE не индексируются), заодно
     фиксируется точная словоформа (word_form) — без нее невозможен поиск
     по суффиксам (P9) и подсветка найденного слова в предложении.
     """
-    token_cache: dict[tuple[str, str], int] = {}
+    sentences_data = nlp_data.get("sentences", [])
+    if not sentences_data:
+        return
 
-    for sent_data in nlp_data.get("sentences", []):
-        words = [t["word"] for t in sent_data["tokens"]]
-        db_sent = Sentence(
+    # 1. Собираем уникальные (lemma, pos) и пакетно синхронизируем таблицу tokens
+    needed_keys: set[tuple[str, str]] = set()
+    for sent_data in sentences_data:
+        for token_data in sent_data["tokens"]:
+            if token_data["pos"] not in ("PUNCT", "SPACE"):
+                needed_keys.add((token_data["lemma"], token_data["pos"]))
+
+    token_cache: dict[tuple[str, str], int] = {}
+    unique_lemmas = list({lemma for lemma, _ in needed_keys})
+    for i in range(0, len(unique_lemmas), 500):
+        batch = unique_lemmas[i:i + 500]
+        for tok in db.query(Token).filter(Token.lemma.in_(batch)).all():
+            token_cache[(tok.lemma, tok.pos)] = tok.id
+
+    missing_tokens = [
+        Token(lemma=lemma, pos=pos)
+        for lemma, pos in sorted(needed_keys)
+        if (lemma, pos) not in token_cache
+    ]
+    if missing_tokens:
+        db.add_all(missing_tokens)
+        db.flush()
+        for tok in missing_tokens:
+            token_cache[(tok.lemma, tok.pos)] = tok.id
+
+    # 2. Пакетно вставляем предложения одним flush
+    db_sentences = [
+        Sentence(
             document_id=doc_id,
             sentence_number=sent_data["sent_id"],
-            text=" ".join(words),
+            text=" ".join(t["word"] for t in sent_data["tokens"]),
         )
-        db.add(db_sent)
-        db.flush()
+        for sent_data in sentences_data
+    ]
+    db.add_all(db_sentences)
+    db.flush()
 
+    # 3. Пакетно вставляем лексический индекс
+    index_mappings: list[dict] = []
+    for db_sent, sent_data in zip(db_sentences, sentences_data):
         word_position = 0
         for token_data in sent_data["tokens"]:
-            lemma_str = token_data["lemma"]
             pos_tag = token_data["pos"]
-
             if pos_tag in ("PUNCT", "SPACE"):
                 continue
-
-            key = (lemma_str, pos_tag)
-            token_id = token_cache.get(key)
-            if token_id is None:
-                db_token = (
-                    db.query(Token)
-                    .filter(Token.lemma == lemma_str, Token.pos == pos_tag)
-                    .first()
-                )
-                if not db_token:
-                    db_token = Token(lemma=lemma_str, pos=pos_tag)
-                    db.add(db_token)
-                    db.flush()
-                token_id = db_token.id
-                token_cache[key] = token_id
-
-            db.add(LexicalIndex(
-                token_id=token_id,
-                sentence_id=db_sent.id,
-                position=word_position,
-                word_form=token_data["word"],
-            ))
+            index_mappings.append({
+                "token_id": token_cache[(token_data["lemma"], pos_tag)],
+                "sentence_id": db_sent.id,
+                "position": word_position,
+                "word_form": token_data["word"],
+            })
             word_position += 1
 
-    db.commit()
+    for i in range(0, len(index_mappings), 5000):
+        db.bulk_insert_mappings(LexicalIndex, index_mappings[i:i + 5000])
 
+    db.commit()
 
 def get_document_index_from_db(db: Session, doc_id: int) -> dict:
     """
