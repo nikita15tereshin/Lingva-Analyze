@@ -174,7 +174,7 @@ def analyze_matrix_parameter_stream(parameter_code: str, max_examples: int = 40)
         print(f"[LLM Stream] Ошибка: {str(e)}")
         yield f"\n\nОшибка при обращении к нейросети: {str(e)}"
 
-def _sample_document_text(sentences: list[str], max_chars: int = 24000) -> str:
+def _sample_document_text(sentences: list[str], max_chars: int = 10000) -> str:
     full_text = " ".join(sentences)
     if len(full_text) <= max_chars:
         return full_text
@@ -213,7 +213,7 @@ def analyze_document_qualitative(
     db,
     doc_id: int,
     llm_call=None,
-    max_chars: int = 24000,
+    max_chars: int = 10000,
 ) -> dict:
     # Пункт 6 ТЗ: структура, тональность, главные угрозы, отношение к РФ/КНР, стилистика
     from src.db.models import Document, Sentence
@@ -244,7 +244,8 @@ def analyze_document_qualitative(
         "3) main_threats (список строк: главные угрозы на первом плане — шпионаж, терроризм, экстремизм и т.д.), "
         "4) geopolitical_attitude (объект: russia, china, other_countries), "
         "5) stylistic_notes (объект: metaphors, historical_references). "
-        "Текст документа (фрагмент): " + excerpt
+        "Текст документа (фрагмент): " \
+        "IMPORTANT: Write all descriptive string values in the JSON strictly in Russian. Keep all JSON keys strictly in English exactly as specified in the schema. Preserve original German wording for direct quotes, chapter titles, and metaphors from the text (adding a brief Russian explanation if helpful)." + excerpt
     )
 
     caller = llm_call or complete_once
