@@ -95,8 +95,8 @@ active_doc_id = docs[selected_idx].id
 st.title("Lingva-Analyze Dashboard")
 st.caption(f"Активный документ ID: {active_doc_id}")
 
-tab_lexicon, tab_kwic, tab_matrix, tab_dict, tab_llm = st.tabs(
-    ["Лексический индекс", "KWIC-конкорданс", "Матрица параметров", "Словари", "LLM"]
+tab_lexicon, tab_kwic, tab_matrix, tab_compare, tab_dict, tab_llm = st.tabs(
+    ["Лексический индекс", "KWIC-конкорданс", "Матрица параметров", "Сравнение", "Словари", "LLM"]
 )
 
 with tab_lexicon:
@@ -322,6 +322,49 @@ with tab_matrix:
             st.info("Попаданий нет. Сначала прогоните параметры по корпусу.")
     finally:
         sum_db.close()
+
+with tab_compare:
+    st.caption("Сравнение двух документов: уникальные регионализмы, значения из словаря и контексты")
+    if len(docs) < 2:
+        st.info("Для сравнения загрузите минимум два документа.")
+    else:
+        col_a, col_b = st.columns(2)
+        idx_a = col_a.selectbox("Документ A", range(len(options)), index=0, format_func=lambda i: options[i], key="cmp_a")
+        idx_b = col_b.selectbox("Документ B", range(len(options)), index=1, format_func=lambda i: options[i], key="cmp_b")
+
+        if st.button("Сравнить"):
+            if docs[idx_a].id == docs[idx_b].id:
+                st.warning("Выберите два разных документа.")
+            else:
+                from src.query.compare import compare_documents
+                cmp_db = SessionLocal()
+                try:
+                    res = compare_documents(cmp_db, docs[idx_a].id, docs[idx_b].id)
+                finally:
+                    cmp_db.close()
+
+                m1, m2 = st.columns(2)
+                m1.metric(f"Уникальных лемм в A ({res["doc_a"]["filename"]})", res["unique_a_total"])
+                m2.metric(f"Уникальных лемм в B ({res["doc_b"]["filename"]})", res["unique_b_total"])
+
+                for title, items in (
+                    (f"Регионализмы только в A ({res["doc_a"]["filename"]})", res["unique_a_regional"]),
+                    (f"Регионализмы только в B ({res["doc_b"]["filename"]})", res["unique_b_regional"]),
+                ):
+                    st.subheader(title)
+                    if not items:
+                        st.info("Совпадений со словарем регионализмов не найдено.")
+                    else:
+                        rows = [
+                            {
+                                "Уникальное слово": it["lemma"],
+                                "Регион": it["region"],
+                                "Значение из словаря": it["meaning"],
+                                "Контекст": " | ".join(it["contexts"]),
+                            }
+                            for it in items
+                        ]
+                        st.dataframe(pd.DataFrame(rows), width="stretch")
 
 with tab_dict:
     st.caption("Пункт 5.3 ТЗ: парсинг внешних словарей (слово-значение) в staging с последующим отбором")
