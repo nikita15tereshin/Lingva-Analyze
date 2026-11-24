@@ -395,6 +395,55 @@ with tab_compare:
                         ]
                         st.dataframe(pd.DataFrame(rows), width="stretch")
 
+                sem = res.get("semantic_candidates") or {}
+                st.subheader("Семантические кандидаты без словаря (контекст ±1)")
+                if not sem.get("embedder_available"):
+                    st.info("Эмбеддер (BAAI/bge-m3) в текущем окружении не загружен; показан только словарный разбор.")
+                else:
+                    ortho_list = sem.get("orthographic") or []
+                    llm_list = sem.get("llm_pool") or []
+                    def_list = sem.get("deferred_pool") or []
+                    st.caption(
+                        f"Уникальных лемм: {sem.get("total_unique", 0)} | "
+                        f"Квота LLM: {sem.get("llm_budget", 0)} | "
+                        f"Орфография: {len(ortho_list)} | "
+                        f"В LLM-пуле: {len(llm_list)} | "
+                        f"Отложено (DEFERRED): {len(def_list)}"
+                    )
+                    sem_rows = []
+                    for item in ortho_list:
+                        sem_rows.append({
+                            "Флаг": "ORTHOGRAPHIC",
+                            "Слово A": item.get("word_a", ""),
+                            "Слово B": item.get("word_b", ""),
+                            "Cos": item.get("cos", ""),
+                            "Margin": item.get("margin", ""),
+                            "Взаимно": item.get("mutual", ""),
+                        })
+                    for item in llm_list:
+                        if item.get("kind") == "vector_pair":
+                            sem_rows.append({
+                                "Флаг": item.get("confidence", ""),
+                                "Слово A": item.get("word_a", ""),
+                                "Слово B": item.get("word_b", ""),
+                                "Cos": item.get("cos", ""),
+                                "Margin": item.get("margin", ""),
+                                "Взаимно": item.get("mutual", ""),
+                            })
+                        else:
+                            sem_rows.append({
+                                "Флаг": item.get("confidence", "RARE_PROBE"),
+                                "Слово A": item.get("word", ""),
+                                "Слово B": f"~{item.get("nearest_in_a", "")}",
+                                "Cos": item.get("cos", ""),
+                                "Margin": "",
+                                "Взаимно": f"freq={item.get("freq", 1)}",
+                            })
+                    if sem_rows:
+                        st.dataframe(pd.DataFrame(sem_rows), width="stretch")
+                    else:
+                        st.info("Кандидаты для семантического пула не сформированы.")
+
 with tab_dict:
     st.caption("Пункт 5.3 ТЗ: парсинг внешних словарей (слово-значение) в staging с последующим отбором")
 
