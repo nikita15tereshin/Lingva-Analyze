@@ -7,3 +7,7 @@ alembic.ini.save
 data/test*
 data/dictionaries/
 data/llm_settings.json
+
+*.db
+*.bundle
+code_snapshot*.txt

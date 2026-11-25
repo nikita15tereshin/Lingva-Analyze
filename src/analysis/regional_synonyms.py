@@ -220,7 +220,8 @@ def verify_candidates_with_llm(
         "word_a (или word), word_b (или null), is_equivalent (bool), relation_type, explanation_ru."
     )
     user_payload = json.dumps({"pair": pair_label, "items": items}, ensure_ascii=False)
-    raw = complete_once(f"{prompt}\n\nДанные:\n{user_payload}")
+    caller = llm_completer or complete_once
+    raw = caller(f"{prompt}\n\nДанные:\n{user_payload}")
 
     cleaned = raw.strip()
     if cleaned.startswith("```"):

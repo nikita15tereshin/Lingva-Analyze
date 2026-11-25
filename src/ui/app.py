@@ -371,79 +371,109 @@ with tab_compare:
                     res = compare_documents(cmp_db, docs[idx_a].id, docs[idx_b].id)
                 finally:
                     cmp_db.close()
+                st.session_state["compare_res"] = res
+                st.session_state.pop("compare_llm_items", None)
 
-                m1, m2 = st.columns(2)
-                m1.metric(f"Уникальных лемм в A ({res["doc_a"]["filename"]})", res["unique_a_total"])
-                m2.metric(f"Уникальных лемм в B ({res["doc_b"]["filename"]})", res["unique_b_total"])
+        res = st.session_state.get("compare_res")
+        if res:
+            m1, m2 = st.columns(2)
+            m1.metric(f"Уникальных лемм в A ({res['doc_a']['filename']})", res["unique_a_total"])
+            m2.metric(f"Уникальных лемм в B ({res['doc_b']['filename']})", res["unique_b_total"])
 
-                for title, items in (
-                    (f"Регионализмы только в A ({res["doc_a"]["filename"]})", res["unique_a_regional"]),
-                    (f"Регионализмы только в B ({res["doc_b"]["filename"]})", res["unique_b_regional"]),
-                ):
-                    st.subheader(title)
-                    if not items:
-                        st.info("Совпадений со словарем регионализмов не найдено.")
-                    else:
-                        rows = [
-                            {
-                                "Уникальное слово": it["lemma"],
-                                "Регион": it["region"],
-                                "Значение из словаря": it["meaning"],
-                                "Контекст": " | ".join(it["contexts"]),
-                            }
-                            for it in items
-                        ]
-                        st.dataframe(pd.DataFrame(rows), width="stretch")
-
-                sem = res.get("semantic_candidates") or {}
-                st.subheader("Семантические кандидаты без словаря (контекст ±1)")
-                if not sem.get("embedder_available"):
-                    st.info("Эмбеддер (BAAI/bge-m3) в текущем окружении не загружен; показан только словарный разбор.")
+            for title, items in (
+                (f"Регионализмы только в A ({res['doc_a']['filename']})", res["unique_a_regional"]),
+                (f"Регионализмы только в B ({res['doc_b']['filename']})", res["unique_b_regional"]),
+            ):
+                st.subheader(title)
+                if not items:
+                    st.info("Совпадений со словарем регионализмов не найдено.")
                 else:
-                    ortho_list = sem.get("orthographic") or []
-                    llm_list = sem.get("llm_pool") or []
-                    def_list = sem.get("deferred_pool") or []
-                    st.caption(
-                        f"Уникальных лемм: {sem.get("total_unique", 0)} | "
-                        f"Квота LLM: {sem.get("llm_budget", 0)} | "
-                        f"Орфография: {len(ortho_list)} | "
-                        f"В LLM-пуле: {len(llm_list)} | "
-                        f"Отложено (DEFERRED): {len(def_list)}"
-                    )
-                    sem_rows = []
-                    for item in ortho_list:
+                    rows = [
+                        {
+                            "Уникальное слово": it["lemma"],
+                            "Регион": it["region"],
+                            "Значение из словаря": it["meaning"],
+                            "Контекст": " | ".join(it["contexts"]),
+                        }
+                        for it in items
+                    ]
+                    st.dataframe(pd.DataFrame(rows), width="stretch")
+
+            sem = res.get("semantic_candidates") or {}
+            st.subheader("Семантические кандидаты без словаря (контекст ±1)")
+            if not sem.get("embedder_available"):
+                st.info("Эмбеддер (BAAI/bge-m3) в текущем окружении не загружен; показан словарный разбор.")
+            else:
+                ortho_list = sem.get("orthographic") or []
+                llm_list = sem.get("llm_pool") or []
+                def_list = sem.get("deferred_pool") or []
+                st.caption(
+                    f"Уникальных лемм: {sem.get('total_unique', 0)} | "
+                    f"Квота LLM: {sem.get('llm_budget', 0)} | "
+                    f"Орфография: {len(ortho_list)} | "
+                    f"В LLM-пуле: {len(llm_list)} | "
+                    f"Отложено (DEFERRED): {len(def_list)}"
+                )
+                sem_rows = []
+                for item in ortho_list:
+                    sem_rows.append({
+                        "Флаг": "ORTHOGRAPHIC",
+                        "Слово A": item.get("word_a", ""),
+                        "Слово B": item.get("word_b", ""),
+                        "Cos": item.get("cos", ""),
+                        "Margin": item.get("margin", ""),
+                        "Взаимно": item.get("mutual", ""),
+                    })
+                for item in llm_list:
+                    if item.get("kind") == "vector_pair":
                         sem_rows.append({
-                            "Флаг": "ORTHOGRAPHIC",
+                            "Флаг": item.get("confidence", ""),
                             "Слово A": item.get("word_a", ""),
                             "Слово B": item.get("word_b", ""),
                             "Cos": item.get("cos", ""),
                             "Margin": item.get("margin", ""),
                             "Взаимно": item.get("mutual", ""),
                         })
-                    for item in llm_list:
-                        if item.get("kind") == "vector_pair":
-                            sem_rows.append({
-                                "Флаг": item.get("confidence", ""),
-                                "Слово A": item.get("word_a", ""),
-                                "Слово B": item.get("word_b", ""),
-                                "Cos": item.get("cos", ""),
-                                "Margin": item.get("margin", ""),
-                                "Взаимно": item.get("mutual", ""),
-                            })
-                        else:
-                            sem_rows.append({
-                                "Флаг": item.get("confidence", "RARE_PROBE"),
-                                "Слово A": item.get("word", ""),
-                                "Слово B": f"~{item.get("nearest_in_a", "")}",
-                                "Cos": item.get("cos", ""),
-                                "Margin": "",
-                                "Взаимно": f"freq={item.get("freq", 1)}",
-                            })
-                    if sem_rows:
-                        st.dataframe(pd.DataFrame(sem_rows), width="stretch")
                     else:
-                        st.info("Кандидаты для семантического пула не сформированы.")
+                        sem_rows.append({
+                            "Флаг": item.get("confidence", "RARE_PROBE"),
+                            "Слово A": item.get("word", ""),
+                            "Слово B": f"~{item.get('nearest_in_a', '')}",
+                            "Cos": item.get("cos", ""),
+                            "Margin": "",
+                            "Взаимно": f"freq={item.get('freq', 1)}",
+                        })
+                if sem_rows:
+                    st.dataframe(pd.DataFrame(sem_rows), width="stretch")
+                else:
+                    st.info("Кандидаты для семантического пула не сформированы.")
 
+            from src.analysis.compare_llm import build_candidate_payload, verify_compare_candidates, save_verified_compare_items
+            cands = build_candidate_payload(res)
+            st.divider()
+            st.subheader("LLM-верификация кандидатов и сохранение в словарь")
+            if not cands:
+                st.caption("Нет кандидатов для проверки через LLM.")
+            else:
+                lim = st.number_input("Лимит кандидатов на запрос", min_value=1, max_value=min(30, len(cands)), value=min(5, len(cands)), key="cmp_llm_lim")
+                if st.button("Проверить через LLM", key="btn_cmp_verify"):
+                    with st.spinner("LLM проверяет кандидатов..."):
+                        try:
+                            st.session_state["compare_llm_items"] = verify_compare_candidates(cands, limit=int(lim))
+                        except Exception as exc:
+                            st.error(str(exc))
+                verified = st.session_state.get("compare_llm_items") or []
+                if verified:
+                    st.dataframe(pd.DataFrame(verified), width="stretch")
+                    if st.button("Сохранить в словарь и БД", key="btn_cmp_save"):
+                        sdb = SessionLocal()
+                        try:
+                            st.success(f"Сохранено: {save_verified_compare_items(sdb, verified)}")
+                        except Exception as exc:
+                            sdb.rollback()
+                            st.error(str(exc))
+                        finally:
+                            sdb.close()
 with tab_dict:
     st.caption("Пункт 5.3 ТЗ: парсинг внешних словарей (слово-значение) в staging с последующим отбором")
 

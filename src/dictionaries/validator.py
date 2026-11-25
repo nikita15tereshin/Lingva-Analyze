@@ -136,13 +136,7 @@ def load_entries(db: Session, entries: list[DictEntry], source_key: str,
 
 def approve_entries(db: Session, ids: list[int] | None = None,
                     source_key: str | None = None) -> int:
-    """Перенос подтвержденных статей из staging в рабочий regional_dictionary.
-
-    Уникальность (lemma, region) гарантируется частичным уникальным индексом
-    uq_regional_word_lemma_region: проверка SELECT + db.add здесь небезопасна
-    при конкурентном аппруве, поэтому вставка идет через ON CONFLICT DO NOTHING,
-    а количество реально добавленных строк берется из rowcount.
-    """
+    """Перенос подтвержденных статей из staging в рабочий regional_dictionary."""
     q = db.query(DictionaryEntry).filter(DictionaryEntry.status == "pending")
     if ids:
         q = q.filter(DictionaryEntry.id.in_(ids))
@@ -152,8 +146,18 @@ def approve_entries(db: Session, ids: list[int] | None = None,
     if not rows:
         return 0
 
-    values = [{"lemma": r.term, "region": r.region, "standard_de": r.definition}
-              for r in rows]
+    eligible = [r for r in rows if (r.region or "").strip().upper() in ("AT", "CH")]
+    if not eligible:
+        return 0
+
+    values = [
+        {
+            "lemma": r.term,
+            "region": r.region.strip().upper(),
+            "standard_de": r.definition,
+        }
+        for r in eligible
+    ]
     dialect = db.get_bind().dialect.name
     if dialect in ("postgresql", "sqlite"):
         ins = (pg_insert if dialect == "postgresql" else sqlite_insert)(
@@ -162,7 +166,7 @@ def approve_entries(db: Session, ids: list[int] | None = None,
         ins = ins.on_conflict_do_nothing(index_elements=["lemma", "region"])
         result = db.execute(ins)
         count = result.rowcount or 0
-    else:  # pragma: no cover - резервный путь для тестовой среды без upsert
+    else:
         existing = {
             (l, g) for l, g in db.query(RegionalWord.lemma, RegionalWord.region).all()
         }
@@ -172,7 +176,7 @@ def approve_entries(db: Session, ids: list[int] | None = None,
                 db.add(RegionalWord(**v))
                 existing.add((v["lemma"], v["region"]))
                 count += 1
-    for r in rows:
+    for r in eligible:
         r.status = "approved"
     db.commit()
     return count
